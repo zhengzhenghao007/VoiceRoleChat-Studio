@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>VoiceRoleChat Studio</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <header class="top-bar">
+        <div class="brand">
+            <h1>VoiceRoleChat Studio</h1>
+            <p>Create local AI characters with custom voices and languages.</p>
+        </div>
+
+        <div class="status">
+            <span class="status-dot"></span>
+            Local mode
+        </div>
+    </header>
+
+    <main class="page-container">
+        <section class="hero-card">
+            <div>
+                <span class="tag">Local AI Voice Studio</span>
+
+                <h2>Create a voice-powered AI character</h2>
+
+                <p class="hero-description">
+                    Import audio, configure a character, choose reply and
+                    translation languages, and connect the generated voice
+                    profile to a local AI application.
+                </p>
+            </div>
+
+            <button class="primary-button" id="createCharacterButton">
+                Create new character
+            </button>
+        </section>
+
+        <section class="workflow-section">
+            <h2>Creation workflow</h2>
+
+            <div class="workflow-grid">
+                <article class="workflow-card">
+                    <span class="step-number">01</span>
+                    <h3>Import audio</h3>
+                    <p>
+                        Upload audio files that you have permission to use.
+                    </p>
+                </article>
+
+                <article class="workflow-card">
+                    <span class="step-number">02</span>
+                    <h3>Generate voice model</h3>
+                    <p>
+                        Process the audio and prepare a local voice model.
+                    </p>
+                </article>
+
+                <article class="workflow-card">
+                    <span class="step-number">03</span>
+                    <h3>Configure character</h3>
+                    <p>
+                        Define personality, behaviour and emotional style.
+                    </p>
+                </article>
+
+                <article class="workflow-card">
+                    <span class="step-number">04</span>
+                    <h3>Select languages</h3>
+                    <p>
+                        Choose reply language, translation language and text display.
+                    </p>
+                </article>
+
+                <article class="workflow-card">
+                    <span class="step-number">05</span>
+                    <h3>Export profile</h3>
+                    <p>
+                        Export the voice and character configuration for a local AI app.
+                    </p>
+                </article>
+
+                <article class="workflow-card">
+                    <span class="step-number">06</span>
+                    <h3>Start chatting</h3>
+                    <p>
+                        Use text or speech and automatically play the character response.
+                    </p>
+                </article>
+            </div>
+        </section>
+
+        <section class="settings-preview">
+            <div>
+                <h2>Planned conversation settings</h2>
+                <p>
+                    These controls will become functional during the next development stages.
+                </p>
+            </div>
+
+            <div class="settings-grid">
+                <label>
+                    Character reply language
+                    <select disabled>
+                        <option>Japanese</option>
+                    </select>
+                </label>
+
+                <label>
+                    Translation language
+                    <select disabled>
+                        <option>Chinese</option>
+                    </select>
+                </label>
+
+                <label class="toggle-row">
+                    <input type="checkbox" checked disabled>
+                    Show reply-language text
+                </label>
+
+                <label class="toggle-row">
+                    <input type="checkbox" checked disabled>
+                    Show translated text
+                </label>
+
+                <label class="toggle-row">
+                    <input type="checkbox" checked disabled>
+                    Automatically play voice
+                </label>
+
+                <label class="toggle-row">
+                    <input type="checkbox" checked disabled>
+                    Enable emotional responses
+                </label>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>
+            VoiceRoleChat Studio runs locally. Use only audio and voice models
+            that you have permission to use.
+        </p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
