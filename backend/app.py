@@ -4,9 +4,12 @@ from uuid import uuid4
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.characters import router as characters_router
+
+
 app = FastAPI(
     title="VoiceRoleChat Studio API",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -16,6 +19,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(characters_router)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = PROJECT_ROOT / "uploads"
@@ -47,7 +52,10 @@ def health_check():
     }
 
 
-@app.post("/api/voices/upload")
+@app.post(
+    "/api/voices/upload",
+    tags=["Voices"],
+)
 async def upload_voice(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(
