@@ -11,7 +11,7 @@ create_project_directories()
 
 app = FastAPI(
     title="VoiceRoleChat Studio API",
-    version="0.5.0",
+    version="0.6.0",
 )
 
 app.add_middleware(
