@@ -9,6 +9,7 @@ VOICES_DIR = PROJECT_ROOT / "voices"
 MODELS_DIR = PROJECT_ROOT / "models"
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 TRANSCRIPTS_DIR = PROJECT_ROOT / "transcripts"
+TRAINING_JOBS_DIR = PROJECT_ROOT / "training_jobs"
 
 ALLOWED_AUDIO_EXTENSIONS = {
     ".wav",
@@ -33,8 +34,8 @@ def create_project_directories() -> None:
         MODELS_DIR,
         OUTPUTS_DIR,
         TRANSCRIPTS_DIR,
+        TRAINING_JOBS_DIR,
     ]
 
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
-        

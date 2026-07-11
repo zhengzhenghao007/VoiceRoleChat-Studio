@@ -253,3 +253,7 @@ Thumbs.db
 # Local transcription results
 transcripts/*
 !transcripts/.gitkeep
+
+# Local training job data
+training_jobs/*
+!training_jobs/.gitkeep

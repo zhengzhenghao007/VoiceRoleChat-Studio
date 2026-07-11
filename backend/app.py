@@ -5,13 +5,13 @@ from api.characters import router as characters_router
 from api.transcriptions import router as transcriptions_router
 from api.voices import router as voices_router
 from config import create_project_directories
-
+from api.training import router as training_router
 
 create_project_directories()
 
 app = FastAPI(
     title="VoiceRoleChat Studio API",
-    version="0.6.0",
+    version="0.7.0",
 )
 
 app.add_middleware(
@@ -25,7 +25,7 @@ app.add_middleware(
 app.include_router(characters_router)
 app.include_router(voices_router)
 app.include_router(transcriptions_router)
-
+app.include_router(training_router)
 
 @app.get("/", tags=["System"])
 def read_root():
