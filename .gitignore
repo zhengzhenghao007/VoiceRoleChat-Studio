@@ -216,3 +216,36 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# VoiceRoleChat Studio local data
+
+# Uploaded source audio
+uploads/*
+!uploads/.gitkeep
+
+# Processed voice files
+voices/*
+!voices/.gitkeep
+
+# Generated voice models
+models/*
+!models/.gitkeep
+
+# Generated audio and other outputs
+outputs/*
+!outputs/.gitkeep
+
+# Local character data
+characters/*
+!characters/.gitkeep
+
+# Environment files
+.env
+.env.*
+
+# Local logs
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
