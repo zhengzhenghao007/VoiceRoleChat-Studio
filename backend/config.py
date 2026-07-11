@@ -8,6 +8,7 @@ CHARACTERS_DIR = PROJECT_ROOT / "characters"
 VOICES_DIR = PROJECT_ROOT / "voices"
 MODELS_DIR = PROJECT_ROOT / "models"
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+TRANSCRIPTS_DIR = PROJECT_ROOT / "transcripts"
 
 ALLOWED_AUDIO_EXTENSIONS = {
     ".wav",
@@ -19,6 +20,10 @@ ALLOWED_AUDIO_EXTENSIONS = {
 
 MAX_AUDIO_FILE_SIZE = 50 * 1024 * 1024
 
+WHISPER_MODEL_SIZE = "small"
+WHISPER_DEVICE = "cpu"
+WHISPER_COMPUTE_TYPE = "int8"
+
 
 def create_project_directories() -> None:
     directories = [
@@ -27,6 +32,7 @@ def create_project_directories() -> None:
         VOICES_DIR,
         MODELS_DIR,
         OUTPUTS_DIR,
+        TRANSCRIPTS_DIR,
     ]
 
     for directory in directories:
