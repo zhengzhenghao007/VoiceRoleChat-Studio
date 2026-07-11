@@ -1,3 +1,5 @@
+from threading import Thread
+
 from fastapi import APIRouter, status
 
 from schemas.training import (
@@ -9,6 +11,7 @@ from services.training_service import (
     get_training_job,
     list_training_jobs,
 )
+from workers.training_worker import run_training_job
 
 
 router = APIRouter(
@@ -23,7 +26,16 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
 )
 def start_training(request: TrainingRequest):
-    return create_training_job(request)
+    job_data = create_training_job(request)
+
+    worker_thread = Thread(
+        target=run_training_job,
+        args=(job_data["job_id"],),
+        daemon=True,
+    )
+    worker_thread.start()
+
+    return job_data
 
 
 @router.get(
