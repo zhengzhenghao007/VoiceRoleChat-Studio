@@ -1,0 +1,34 @@
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+UPLOAD_DIR = PROJECT_ROOT / "uploads"
+CHARACTERS_DIR = PROJECT_ROOT / "characters"
+VOICES_DIR = PROJECT_ROOT / "voices"
+MODELS_DIR = PROJECT_ROOT / "models"
+OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+
+ALLOWED_AUDIO_EXTENSIONS = {
+    ".wav",
+    ".mp3",
+    ".m4a",
+    ".flac",
+    ".ogg",
+}
+
+MAX_AUDIO_FILE_SIZE = 50 * 1024 * 1024
+
+
+def create_project_directories() -> None:
+    directories = [
+        UPLOAD_DIR,
+        CHARACTERS_DIR,
+        VOICES_DIR,
+        MODELS_DIR,
+        OUTPUTS_DIR,
+    ]
+
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+        
