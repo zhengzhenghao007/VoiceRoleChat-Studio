@@ -257,3 +257,7 @@ transcripts/*
 # Local training job data
 training_jobs/*
 !training_jobs/.gitkeep
+
+# Local GPT-SoVITS datasets
+datasets/*
+!datasets/.gitkeep

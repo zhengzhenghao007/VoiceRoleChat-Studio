@@ -10,6 +10,7 @@ MODELS_DIR = PROJECT_ROOT / "models"
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 TRANSCRIPTS_DIR = PROJECT_ROOT / "transcripts"
 TRAINING_JOBS_DIR = PROJECT_ROOT / "training_jobs"
+DATASETS_DIR = PROJECT_ROOT / "datasets"
 
 ALLOWED_AUDIO_EXTENSIONS = {
     ".wav",
@@ -35,6 +36,7 @@ def create_project_directories() -> None:
         OUTPUTS_DIR,
         TRANSCRIPTS_DIR,
         TRAINING_JOBS_DIR,
+        DATASETS_DIR,
     ]
 
     for directory in directories:
