@@ -261,3 +261,20 @@ training_jobs/*
 # Local GPT-SoVITS datasets
 datasets/*
 !datasets/.gitkeep
+
+# Local GPT-SoVITS installation
+GPT-SoVITS/
+
+# VoiceRoleChat-Studio runtime data
+training_jobs/
+models/
+uploads/
+datasets/
+
+# Local backups
+*.bak
+
+# Environment files
+.env
+.env.*
+!.env.example
