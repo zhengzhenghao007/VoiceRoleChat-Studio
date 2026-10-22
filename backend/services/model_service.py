@@ -8,6 +8,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
+from config import env_path
 from schemas.model import VoiceModelInfo
 
 logger = logging.getLogger(__name__)
@@ -83,18 +84,17 @@ class ModelService:
         sovits_weights_dir: Path | None = None,
     ) -> None:
         self.project_root = project_root.resolve()
+        tool_root = env_path("GPT_SOVITS_ROOT", self.project_root / "GPT-SoVITS", base=self.project_root)
 
         self.gpt_weights_dir = (
             gpt_weights_dir
-            or self.project_root
-            / "GPT-SoVITS"
+            or tool_root
             / "GPT_weights_v2Pro"
         ).resolve()
 
         self.sovits_weights_dir = (
             sovits_weights_dir
-            or self.project_root
-            / "GPT-SoVITS"
+            or tool_root
             / "SoVITS_weights_v2Pro"
         ).resolve()
 
@@ -299,6 +299,8 @@ class ModelService:
             return False
         for file in files:
             resolved = file.resolve()
+            if windows.is_absolute() and windows == PureWindowsPath(str(resolved)):
+                return True
             if not resolved.is_relative_to(self.project_root):
                 continue
             relative = resolved.relative_to(self.project_root)

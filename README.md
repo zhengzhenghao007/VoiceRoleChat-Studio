@@ -62,15 +62,19 @@ python -m venv .venv
 
 ### 启动后端
 
-在仓库根目录执行：
+推荐从仓库根目录检查环境后启动：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app:app --app-dir backend --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe run.py --check
+.\.venv\Scripts\python.exe run.py --host 127.0.0.1 --port 8000
 ```
 
-使用已有 Python 环境时，将 `.\.venv\Scripts\python.exe` 替换为对应解释器。
-后端按 `backend` 为模块搜索目录组织导入，启动时需要保留 `--app-dir backend`。
-首次初始化会创建项目所需的本地数据目录。
+使用已有 Python 环境时，将 `.\.venv\Scripts\python.exe` 替换为对应解释器。也可从任意目录以绝对路径调用 `run.py`。
+启动器会设置后端模块目录，默认绑定 `127.0.0.1:8000`。
+直接使用 Uvicorn 时，仍可执行 `python -m uvicorn app:app --app-dir backend --host 127.0.0.1 --port 8000`。
+正常启动会创建所需数据目录；`--check` 只读检查，不创建目录、不启动服务、不加载 ML 模块或下载模型。
+
+自动化诊断使用 `python run.py --check --json`，stdout 为 JSON。退出码：`0` 表示必需检查通过（可含训练资源缺失告警），`1` 表示依赖或配置错误，`2` 表示命令行参数无效。依赖检查只证明模块可以发现；训练资源检查只核对路径及类型，不证明硬件或模型可用。
 
 打开：
 
@@ -92,7 +96,7 @@ python -m http.server 8080 --bind 127.0.0.1 --directory frontend
 
 ## GPT-SoVITS 与转写配置
 
-项目默认在根目录的 `GPT-SoVITS/` 查找外部安装，主要使用 v2Pro 训练流程。
+项目默认在根目录的 `GPT-SoVITS/` 查找外部安装，目前仅支持 v2Pro 训练流程。
 训练前必须自行准备兼容的上游环境和预训练文件。
 
 | 路径（相对 `GPT-SoVITS/`） | 用途 |
@@ -104,22 +108,37 @@ python -m http.server 8080 --bind 127.0.0.1 --directory frontend
 | `GPT_SoVITS/pretrained_models/v2Pro/s2Dv2Pro.pth` | SoVITS 判别器初始权重 |
 | `GPT_SoVITS/pretrained_models/s1v3.ckpt` | GPT 初始权重 |
 
-训练使用的 Python 解释器可以通过环境变量指定：
+配置通过启动后端之前设置的环境变量生效：
+
+| 环境变量 | 默认值 / 约束 |
+|---|---|
+| `GPT_SOVITS_ROOT` | `<repo>/GPT-SoVITS`；工具、预训练资源和训练权重发现使用此目录 |
+| `GPT_SOVITS_PYTHON` | 保留原开发机 Conda 回退路径；其他机器请显式配置 |
+| `GPT_SOVITS_VERSION` | `v2Pro`；当前其他版本会返回明确配置错误 |
+| `GPT_SOVITS_GPU` | `0`；当前仅支持单个 GPU 编号，检查不探测真实 GPU |
+| `WHISPER_MODEL_SIZE` | `small`；模型名称或模型标识 |
+| `WHISPER_DEVICE` | `cpu`；可选 `cpu`、`cuda`、`auto` |
+| `WHISPER_COMPUTE_TYPE` | `int8`；如 `float32`、`float16`、`auto` 等受支持类型；硬件兼容性在实际加载时判断 |
 
 ```powershell
+$env:GPT_SOVITS_ROOT = 'D:\tools\GPT-SoVITS'
 $env:GPT_SOVITS_PYTHON = 'C:\path\to\your\gpt-sovits\python.exe'
+$env:WHISPER_MODEL_SIZE = 'small'
+$env:WHISPER_DEVICE = 'cpu'
+python run.py --check
 ```
 
-在启动后端的同一终端设置。当前未设置时的回退路径带有原开发机器的用户名，新机器应显式配置；其他参数见 [backend/config.py](backend/config.py)。
-Whisper 默认使用 `small`、CPU 和 `int8`；首次真实转写可能尝试获取缺失的模型文件。仅启动后端和运行本仓库测试不会触发该模型加载。
+在启动后端的同一终端设置。两个路径配置的相对值均以仓库根目录解析，与当前工作目录无关。空值、无效版本及无效设备配置会被拒绝。没有隐式加载 `.env` 文件。
+角色、数据集、导出模型和任务数据仍保存在仓库内原有目录，不会随工具目录迁移。训练权重扫描跟随 `GPT_SOVITS_ROOT`，导出 manifest 扫描仍在项目的 `models/`。
+其他参数见 [backend/config.py](backend/config.py)。首次真实转写可能尝试获取缺失的 Whisper 模型文件；仅启动后端和运行本仓库测试不会触发该模型加载。
 
 ## 模型目录与 API 行为
 
 模型注册器读取：
 
 ```text
-GPT-SoVITS/GPT_weights_v2Pro/       # *.ckpt，例如 actor_1234abcd-e15.ckpt
-GPT-SoVITS/SoVITS_weights_v2Pro/    # *.pth，例如 actor_1234abcd_e8_s400.pth
+<GPT_SOVITS_ROOT>/GPT_weights_v2Pro/       # *.ckpt，例如 actor_1234abcd-e15.ckpt
+<GPT_SOVITS_ROOT>/SoVITS_weights_v2Pro/    # *.pth，例如 actor_1234abcd_e8_s400.pth
 models/<job_id>/manifest.json      # 导出记录与对应权重
 ```
 
@@ -152,24 +171,26 @@ models/<job_id>/manifest.json      # 导出记录与对应权重
 
 ## 开发与测试
 
-测试额外依赖 `httpx`，在后端环境中安装后，从根目录运行：
+测试开发依赖见 [backend/requirements-dev.txt](backend/requirements-dev.txt)，从根目录运行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install httpx
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 测试使用临时空文件验证注册逻辑，不加载真实模型，也不会启动 GPU 训练。
 部分测试只读访问当前本地角色和模型记录，因此本地损坏的配置文件可能影响测试结果。
 
-最近验证：两套现有 Python 环境均运行 **19 项测试：18 项通过、1 项跳过**。
+开发依赖声明固定了 `httpx==0.28.1`；这不是完整的运行时或传递依赖锁文件，也不是全新环境安装验收。
+最近验证：两套现有 Python 环境均运行 **30 项测试：29 项通过、1 项跳过**，包括其他工作目录下通过 `run.py` 启动真实 HTTP 服务。
 跳过项是需要额外 Windows 权限的真实符号链接测试；另有模拟路径解析逃逸测试通过。
-这不是全新环境安装或 GPU 推理的完整验收。详见 [C2C-001 审计](docs/C2C-001-audit.md) 和 [C2C-002 实现记录](docs/C2C-002-results.md)。
+这不是全新环境安装或 GPU 推理的完整验收。详见 [C2C-001 审计](docs/C2C-001-audit.md)、[C2C-002 实现记录](docs/C2C-002-results.md) 和 [C2C-003 启动验证](docs/C2C-003-results.md)。
 
 ## 仓库结构与本地数据
 
 ```text
 backend/        FastAPI 路由、Schema、服务与训练 Worker
+run.py          根目录启动与只读环境检查入口
 frontend/       静态前端原型
 tests/          后端和模型注册测试
 docs/           审计、测试记录与开发路线

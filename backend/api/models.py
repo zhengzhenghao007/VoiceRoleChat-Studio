@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, status
 
+from config import PROJECT_ROOT
 from schemas.model import (
     VoiceModelInfo,
     VoiceModelListResponse,
@@ -18,23 +19,11 @@ router = APIRouter(
 
 def find_project_root() -> Path:
     """
-    Find the project root directory.
-
-    Expected structure:
-
-    VoiceRoleChat-Studio/
-    ├── backend/
-    ├── GPT-SoVITS/
-    └── ...
+    Return the data project root, independent of the external tool installation.
     """
 
-    current = Path(__file__).resolve()
-
-    for parent in current.parents:
-        if (parent / "backend").exists() and (parent / "GPT-SoVITS").exists():
-            return parent
-
-    raise RuntimeError("Cannot locate project root.")
+    # The external installation may be configured elsewhere or not installed.
+    return PROJECT_ROOT
 
 
 @lru_cache(maxsize=1)

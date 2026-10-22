@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# TestClient dependency; this is not a complete runtime/transitive lockfile.
+httpx==0.28.1
