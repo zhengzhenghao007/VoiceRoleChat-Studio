@@ -1,6 +1,7 @@
 ﻿import os
 from pathlib import Path
 import re
+import math
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -105,6 +106,27 @@ if WHISPER_COMPUTE_TYPE not in {
     "int16", "float16", "float32", "bfloat16",
 }:
     raise ValueError("WHISPER_COMPUTE_TYPE is not a recognized compute type")
+
+
+def env_timeout(name: str, default: str, maximum: float) -> float:
+    try:
+        value = float(env_text(name, default))
+    except ValueError as error:
+        raise ValueError(f"{name} must be a positive finite number") from error
+    if not math.isfinite(value) or not 0 < value <= maximum:
+        raise ValueError(f"{name} must be greater than 0 and at most {maximum}")
+    return value
+
+
+try:
+    GPT_SOVITS_API_PORT = int(env_text("GPT_SOVITS_API_PORT", "9880"))
+except ValueError as error:
+    raise ValueError("GPT_SOVITS_API_PORT must be an integer from 1 to 65535") from error
+if not 1 <= GPT_SOVITS_API_PORT <= 65535:
+    raise ValueError("GPT_SOVITS_API_PORT must be an integer from 1 to 65535")
+GPT_SOVITS_REQUEST_TIMEOUT = env_timeout("GPT_SOVITS_REQUEST_TIMEOUT", "2", 30)
+GPT_SOVITS_START_TIMEOUT = env_timeout("GPT_SOVITS_START_TIMEOUT", "120", 600)
+GPT_SOVITS_STOP_TIMEOUT = env_timeout("GPT_SOVITS_STOP_TIMEOUT", "10", 60)
 
 
 def create_project_directories() -> None:

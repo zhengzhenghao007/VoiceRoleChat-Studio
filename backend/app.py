@@ -1,4 +1,7 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.characters import router as characters_router
@@ -7,15 +10,25 @@ from api.models import router as models_router
 from api.training import router as training_router
 from api.transcriptions import router as transcriptions_router
 from api.voices import router as voices_router
+from api.tts import router as tts_router, close_tts_service
 from config import create_project_directories
 
 
 create_project_directories()
 
 
+@asynccontextmanager
+async def lifespan(app):
+    try:
+        yield
+    finally:
+        await run_in_threadpool(close_tts_service)
+
+
 app = FastAPI(
     title="VoiceRoleChat Studio API",
     version="0.9.0",
+    lifespan=lifespan,
 )
 
 
@@ -34,6 +47,7 @@ app.include_router(transcriptions_router)
 app.include_router(training_router)
 app.include_router(datasets_router)
 app.include_router(models_router)
+app.include_router(tts_router)
 
 
 @app.get("/", tags=["System"])

@@ -17,7 +17,9 @@ sys.path.insert(0, str(ROOT))
 import run
 
 CONFIG_ENV = ("GPT_SOVITS_ROOT", "GPT_SOVITS_PYTHON", "GPT_SOVITS_VERSION",
-              "GPT_SOVITS_GPU", "WHISPER_MODEL_SIZE", "WHISPER_DEVICE", "WHISPER_COMPUTE_TYPE")
+              "GPT_SOVITS_GPU", "WHISPER_MODEL_SIZE", "WHISPER_DEVICE", "WHISPER_COMPUTE_TYPE",
+              "GPT_SOVITS_API_PORT", "GPT_SOVITS_REQUEST_TIMEOUT", "GPT_SOVITS_START_TIMEOUT",
+              "GPT_SOVITS_STOP_TIMEOUT")
 
 
 def environment(**overrides):
@@ -80,6 +82,9 @@ class StartupTests(unittest.TestCase):
         for override in ({"GPT_SOVITS_PYTHON": " "}, {"WHISPER_DEVICE": "invalid"},
                          {"GPT_SOVITS_VERSION": "unsupported"}, {"GPT_SOVITS_GPU": "bad"},
                          {"GPT_SOVITS_GPU": "0-1"},
+                         {"GPT_SOVITS_API_PORT": "0"}, {"GPT_SOVITS_API_PORT": "65536"},
+                         {"GPT_SOVITS_REQUEST_TIMEOUT": "nan"}, {"GPT_SOVITS_START_TIMEOUT": "inf"},
+                         {"GPT_SOVITS_STOP_TIMEOUT": "0"}, {"GPT_SOVITS_STOP_TIMEOUT": "61"},
                          {"WHISPER_COMPUTE_TYPE": "invalid"}):
             with self.subTest(override=override):
                 result = self.cli("--check", "--json", env=environment(**override))
@@ -143,9 +148,13 @@ class StartupTests(unittest.TestCase):
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            service_port = sock.getsockname()[1]
         with tempfile.TemporaryDirectory() as directory:
             process = subprocess.Popen([sys.executable, str(ROOT / "run.py"), "--port", str(port)],
-                                       cwd=directory, env=environment(), stdout=subprocess.PIPE,
+                                       cwd=directory, env=environment(GPT_SOVITS_API_PORT=str(service_port),
+                                                                      GPT_SOVITS_REQUEST_TIMEOUT="0.1"), stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, text=True)
             try:
                 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -156,6 +165,13 @@ class StartupTests(unittest.TestCase):
                         with opener.open(f"http://127.0.0.1:{port}/health", timeout=1) as response:
                             self.assertEqual(response.status, 200)
                             self.assertEqual(json.load(response), {"status": "healthy"})
+                        with opener.open(f"http://127.0.0.1:{port}/api/tts/service", timeout=2) as response:
+                            state = json.load(response)
+                            self.assertEqual((state["state"], state["managed"], state["pid"]),
+                                             ("unavailable", False, None))
+                        request = urllib.request.Request(f"http://127.0.0.1:{port}/api/tts/service/stop", method="POST")
+                        with opener.open(request, timeout=2) as response:
+                            self.assertEqual(json.load(response)["state"], "stopped")
                         break
                     except OSError:
                         time.sleep(0.1)

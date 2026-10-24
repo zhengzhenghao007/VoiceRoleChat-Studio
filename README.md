@@ -15,6 +15,7 @@
 | 数据集 | 从音频和转写生成 GPT-SoVITS 标注 | 已有实现；逐段校对、切片与质量检查待开发 |
 | 训练 | 后台任务、状态记录和 GPT-SoVITS Worker | 已有训练产物；本轮未重跑 GPU 训练 |
 | 模型管理 | 权重配对、版本选择、导出发现、来源去重、ID 冲突处理 | 已有专项回归与真实列表/详情/刷新测试 |
+| 推理服务管理 | 状态探测、自有进程启停、超时和正常退出清理 | 假 HTTP 与真实轻量子进程已验证；尚未启动真实模型验收 |
 | 前端 | 页面结构和流程展示 | 静态原型，尚未接入业务 API |
 | 角色聊天 | LLM、会话历史、双语回复和语音播放 | 规划中 |
 
@@ -116,6 +117,10 @@ python -m http.server 8080 --bind 127.0.0.1 --directory frontend
 | `GPT_SOVITS_PYTHON` | 保留原开发机 Conda 回退路径；其他机器请显式配置 |
 | `GPT_SOVITS_VERSION` | `v2Pro`；当前其他版本会返回明确配置错误 |
 | `GPT_SOVITS_GPU` | `0`；当前仅支持单个 GPU 编号，检查不探测真实 GPU |
+| `GPT_SOVITS_API_PORT` | `9880`；1–65535，固定使用本机回环地址 |
+| `GPT_SOVITS_REQUEST_TIMEOUT` | `2` 秒；大于 0、最多 30 秒，单次探测总时限 |
+| `GPT_SOVITS_START_TIMEOUT` | `120` 秒；大于 0、最多 600 秒，启动就绪等待时限 |
+| `GPT_SOVITS_STOP_TIMEOUT` | `10` 秒；大于 0、最多 60 秒，停止等待总预算 |
 | `WHISPER_MODEL_SIZE` | `small`；模型名称或模型标识 |
 | `WHISPER_DEVICE` | `cpu`；可选 `cpu`、`cuda`、`auto` |
 | `WHISPER_COMPUTE_TYPE` | `int8`；如 `float32`、`float16`、`auto` 等受支持类型；硬件兼容性在实际加载时判断 |
@@ -131,6 +136,29 @@ python run.py --check
 在启动后端的同一终端设置。两个路径配置的相对值均以仓库根目录解析，与当前工作目录无关。空值、无效版本及无效设备配置会被拒绝。没有隐式加载 `.env` 文件。
 角色、数据集、导出模型和任务数据仍保存在仓库内原有目录，不会随工具目录迁移。训练权重扫描跟随 `GPT_SOVITS_ROOT`，导出 manifest 扫描仍在项目的 `models/`。
 其他参数见 [backend/config.py](backend/config.py)。首次真实转写可能尝试获取缺失的 Whisper 模型文件；仅启动后端和运行本仓库测试不会触发该模型加载。
+
+## 推理服务启停
+
+业务后端启动时不会自动启动 GPT-SoVITS。准备好上述外部解释器、`api_v2.py`、GPT/SoVITS 初始权重和 BERT/HuBERT 后，显式调用：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/tts/service
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/tts/service/start
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/tts/service/stop
+```
+
+本轮以 CPU、`is_half=false`、v2Pro 启动上游服务，子进程设为离线模式，不主动获取缺失模型。
+每次启动将独立配置和日志写入 `outputs/tts-service/<run-id>/`，不会改写上游 `tts_infer.yaml`。
+资源文件存在并不保证其内容有效；启动失败时查看对应 `service.log`。
+
+返回 `state`、`managed`、`pid`、`detail`。状态含义：`unavailable` 未就绪；`starting` 正在启动；`ready` 兼容接口可响应；`stopped` 已完成显式停止；`failed` 自有进程退出或启动/清理失败。
+`ready` 仅验证 OpenAPI 的推理和权重切换路由，不验证服务身份、模型加载或合成质量。探测不发起合成。
+手动启动的兼容服务显示 `managed=false`、`pid=null`；对任何外部监听服务请求启停都返回 409，工作室不会接管或结束它。
+并发启停返回 409；缺文件或提前退出返回 503；启动或清理超时返回 504。停止时先终止，再在剩余预算内强制结束自有进程；清理失败保留句柄供重试。
+
+**仅支持一个业务后端进程**，不要使用多个 Uvicorn worker 或同时运行多个工作室后端。
+正常退出会清理自有子进程；强制结束后端、系统崩溃不保证清理。当前按上游单服务进程管理，不负责其自行派生的孙进程，也不会根据进程名或 PID 文件接管遗留进程。
+真实 GPT-SoVITS 启动、模型切换和声音合成留到下一项验证；本轮没有完成语音生成接口。
 
 ## 模型目录与 API 行为
 
@@ -166,6 +194,9 @@ models/<job_id>/manifest.json      # 导出记录与对应权重
 | GET | `/api/models` | 模型列表 |
 | GET | `/api/models/refresh` | 刷新模型发现 |
 | GET | `/api/models/{model_id}` | 模型详情 |
+| GET | `/api/tts/service` | 本地 GPT-SoVITS 服务状态 |
+| POST | `/api/tts/service/start` | 显式启动自有 CPU 服务 |
+| POST | `/api/tts/service/stop` | 停止自有服务 |
 
 请求体及上传格式以运行中的 `/docs` 为准。训练接口不是普通健康检查，不要将它加入自动冒烟测试。
 
@@ -182,9 +213,9 @@ models/<job_id>/manifest.json      # 导出记录与对应权重
 部分测试只读访问当前本地角色和模型记录，因此本地损坏的配置文件可能影响测试结果。
 
 开发依赖声明固定了 `httpx==0.28.1`；这不是完整的运行时或传递依赖锁文件，也不是全新环境安装验收。
-最近验证：两套现有 Python 环境均运行 **30 项测试：29 项通过、1 项跳过**，包括其他工作目录下通过 `run.py` 启动真实 HTTP 服务。
+最近验证：两套现有 Python 环境均运行 **44 项测试：43 项通过、1 项跳过**，包括其他工作目录下通过 `run.py` 启动真实 HTTP 服务及轻量子进程启停。
 跳过项是需要额外 Windows 权限的真实符号链接测试；另有模拟路径解析逃逸测试通过。
-这不是全新环境安装或 GPU 推理的完整验收。详见 [C2C-001 审计](docs/C2C-001-audit.md)、[C2C-002 实现记录](docs/C2C-002-results.md) 和 [C2C-003 启动验证](docs/C2C-003-results.md)。
+这不是全新环境安装或 GPU 推理的完整验收。详见 [C2C-001 审计](docs/C2C-001-audit.md)、[C2C-002 实现记录](docs/C2C-002-results.md)、[C2C-003 启动验证](docs/C2C-003-results.md) 和 [C2C-004 服务管理](docs/C2C-004-results.md)。
 
 ## 仓库结构与本地数据
 
