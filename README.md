@@ -9,7 +9,7 @@
 | 模块 | 当前能力 | 验证边界 |
 |---|---|---|
 | 后端基础 | FastAPI、健康检查、OpenAPI | 已通过实际 Uvicorn HTTP 测试 |
-| 角色 | 创建、列表、详情和本地 JSON 保存 | 列表及响应校验已测试；编辑和模型绑定待开发 |
+| 角色 | 创建、编辑、版本化 JSON、声音绑定和按角色合成 | 已验证兼容旧记录、修订冲突、绑定和合成配置快照 |
 | 音频上传 | 音频扩展名、大小校验与文件保存 | 已有实现；完整音频库和录音 UI 待开发 |
 | 语音转写 | faster-whisper，首次调用时加载模型 | 已有实现；本轮未执行真实转写 |
 | 数据集 | 从音频和转写生成 GPT-SoVITS 标注 | 已有实现；逐段校对、切片与质量检查待开发 |
@@ -189,6 +189,34 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/tts/service/stop
 结果包含 `id/model_id/audio_url/sample_rate/duration_seconds`，校验后的 WAV 原子保存到 `outputs/tts/`，最大 32 MiB。参考音频使用临时快照，不修改原文件；读取接口只开放合法生成 ID。
 已验证一条日语短句的 CPU 合成和非静音 WAV；这不代表全部模型、语言、硬件或声音质量已通过验收。
 
+## 角色编辑与声音绑定
+
+`POST /api/characters` 创建角色；`PATCH /api/characters/{id}` 只更新提交的字段。编辑时带上最近读取的 `expected_revision`，版本冲突返回 409，此时先重新读取再决定如何合并。
+角色 ID 为 32 位小写十六进制字符串。`id/created_at/schema_version/revision` 不可直接修改；空 PATCH、未知字段和必需字段的空值返回 422。
+
+绑定声音的 PATCH 示例：
+
+```json
+{
+  "expected_revision": 1,
+  "voice_config": {
+    "version": 1,
+    "model_id": "<模型列表中的 ID>",
+    "reference_audio": "uploads/<参考 WAV>.wav",
+    "prompt_text": "<参考音频中的文本>",
+    "prompt_lang": "ja",
+    "text_lang": "ja"
+  }
+}
+```
+
+声音配置为完整对象替换；省略 `voice_config` 保留绑定，显式 `"voice_config": null` 清除绑定。
+保存时复用模型与参考 WAV 的校验，不要求推理服务启动，也不切换模型。绑定不代表角色完成过训练；旧的 `voice_file/model_status` 元数据仍然保留。
+需要发声时先启动托管服务，再向 `POST /api/characters/{id}/synthesize` 提交 `{"text":"こんにちは。"}`。它使用已保存的声音配置，返回相同的 WAV 结果和读取地址。没有绑定时为 409。
+正在合成的请求保留开始时的配置快照；之后编辑角色只影响后续请求。模型或参考文件被删除后，下一次合成会重新校验并报错。
+
+新记录使用 `schema_version=2`、`revision=1`。旧记录读取时展示版本 1、修订号 0 和空声音配置，但**不重写旧文件**；首次编辑才原子迁移到版本 2，并保留未知旧字段及创建时间。高于当前支持的存储版本返回 409，损坏配置返回可定位的 500，不自动覆盖。并发保护限于单个后端进程。
+
 ## 模型目录与 API 行为
 
 模型注册器读取：
@@ -213,6 +241,8 @@ models/<job_id>/manifest.json      # 导出记录与对应权重
 | GET | `/health` | 服务健康检查 |
 | POST / GET | `/api/characters` | 创建角色 / 列出角色 |
 | GET | `/api/characters/{character_id}` | 角色详情 |
+| PATCH | `/api/characters/{character_id}` | 编辑角色或替换/清除声音绑定 |
+| POST | `/api/characters/{character_id}/synthesize` | 使用保存的角色声音合成 |
 | POST | `/api/voices/upload` | 上传音频 |
 | POST | `/api/transcriptions` | 转写已上传音频 |
 | POST | `/api/transcriptions/upload` | 上传并转写 |
@@ -244,9 +274,9 @@ models/<job_id>/manifest.json      # 导出记录与对应权重
 部分测试只读访问当前本地角色和模型记录，因此本地损坏的配置文件可能影响测试结果。
 
 开发依赖声明固定了 `httpx==0.28.1`；这不是完整的运行时或传递依赖锁文件，也不是全新环境安装验收。
-最近验证：两套现有 Python 环境均运行 **61 项测试：60 项通过、1 项跳过**，包括真实 HTTP 启动、合成事务、错误清理和 WAV 读取。
+最近验证：两套现有 Python 环境均运行 **77 项测试：76 项通过、1 项跳过**，包括真实 HTTP 启动、合成事务、角色持久化与声音绑定。
 跳过项是需要额外 Windows 权限的真实符号链接测试；另有模拟路径解析逃逸测试通过。
-这不是全新环境安装或 GPU 推理的完整验收。详见 [C2C-001 审计](docs/C2C-001-audit.md)、[C2C-002 实现记录](docs/C2C-002-results.md)、[C2C-003 启动验证](docs/C2C-003-results.md)、[C2C-004 服务管理](docs/C2C-004-results.md) 和 [C2C-005 合成验证](docs/C2C-005-results.md)。
+这不是全新环境安装或 GPU 推理的完整验收。详见 [C2C-001 审计](docs/C2C-001-audit.md)、[C2C-002 实现记录](docs/C2C-002-results.md)、[C2C-003 启动验证](docs/C2C-003-results.md)、[C2C-004 服务管理](docs/C2C-004-results.md)、[C2C-005 合成验证](docs/C2C-005-results.md) 和 [C2C-006 角色声音](docs/C2C-006-results.md)。
 
 ## 仓库结构与本地数据
 

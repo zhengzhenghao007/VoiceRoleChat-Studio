@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 from uuid import uuid4
 import wave
 
-from schemas.tts import SynthesisRequest, SynthesisResult
+from schemas.tts import SynthesisRequest, SynthesisResult, VoiceSettings
 from services.model_service import AmbiguousModelIdError
 from services.tts_service import ServiceTimeout, ServiceUnavailable
 
@@ -124,6 +124,12 @@ class SynthesisService:
                 raise SynthesisError("Registered model weight is missing or outside allowed directories", 409)
             paths.append(path)
         return model, paths
+
+    def validate_voice(self, settings: VoiceSettings) -> VoiceSettings:
+        """Validate a persisted binding without probing or mutating inference."""
+        self._reference(settings.reference_audio)
+        model, _ = self._model(settings.model_id)
+        return settings.model_copy(update={"model_id": model.id})
 
     def synthesize(self, request: SynthesisRequest) -> SynthesisResult:
         # Snapshot validated reference data before waiting for any upstream work.

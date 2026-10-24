@@ -12,15 +12,14 @@ class ServiceStatus(BaseModel):
 Language = Literal["zh", "ja", "en", "ko", "yue", "all_zh", "all_ja", "all_ko", "all_yue", "auto", "auto_yue"]
 
 
-class SynthesisRequest(BaseModel):
+class VoiceSettings(BaseModel):
     model_id: str = Field(min_length=1, max_length=128)
-    text: str = Field(min_length=1, max_length=1000)
     text_lang: Language
     reference_audio: str = Field(min_length=1, max_length=1024)
     prompt_text: str = Field(min_length=1, max_length=1000)
     prompt_lang: Language
 
-    @validator("model_id", "text", "reference_audio", "prompt_text", pre=True)
+    @validator("model_id", "reference_audio", "prompt_text", pre=True)
     def strip_text(cls, value):
         return value.strip() if isinstance(value, str) else value
 
@@ -29,6 +28,14 @@ class SynthesisRequest(BaseModel):
         if any(ord(char) < 32 or 0xD800 <= ord(char) <= 0xDFFF for char in value):
             raise ValueError("Reference path contains invalid characters")
         return value
+
+
+class SynthesisRequest(VoiceSettings):
+    text: str = Field(min_length=1, max_length=1000)
+
+    @validator("text", pre=True)
+    def strip_synthesis_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class SynthesisResult(BaseModel):

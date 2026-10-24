@@ -1,165 +1,62 @@
-import json
-from datetime import datetime, timezone
-from pathlib import Path
-from uuid import uuid4
+"""Character HTTP API; persistence and validation live in focused services."""
+from fastapi import APIRouter, Depends, HTTPException
 
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from api.models import get_model_service
+from api.tts import get_synthesis_service, lifecycle
+from config import CHARACTERS_DIR, PROJECT_ROOT
+from schemas.character import (CharacterCreate, CharacterPatch, CharacterResponse,
+                               CharacterSynthesisRequest)
+from schemas.tts import SynthesisRequest, SynthesisResult
+from services.character_service import CharacterService, CharacterError
+from services.synthesis_service import SynthesisService
 
-
-router = APIRouter(
-    prefix="/api/characters",
-    tags=["Characters"],
-)
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-CHARACTERS_DIR = PROJECT_ROOT / "characters"
-
-CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
+router = APIRouter(prefix="/api/characters", tags=["Characters"])
 
 
-class CharacterCreate(BaseModel):
-    name: str = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        description="Display name of the character",
-    )
-
-    description: str = Field(
-        default="",
-        max_length=1000,
-        description="Short description of the character",
-    )
-
-    system_prompt: str = Field(
-        ...,
-        min_length=1,
-        max_length=10000,
-        description="Instructions that define the character",
-    )
-
-    reply_language: str = Field(
-        default="English",
-        max_length=50,
-        description="Language used for character replies",
-    )
-
-    translation_language: str = Field(
-        default="English",
-        max_length=50,
-        description="Language used for translated text",
-    )
-
-    show_original_text: bool = True
-    show_translated_text: bool = True
-    auto_play_voice: bool = True
-    emotional_responses: bool = True
+def get_character_service(models=Depends(get_model_service)):
+    # Binding validation requires no manager, network probe or process creation.
+    validator = SynthesisService(None, models, project_root=PROJECT_ROOT)
+    return CharacterService(CHARACTERS_DIR, voice_validator=validator.validate_voice)
 
 
-class CharacterResponse(CharacterCreate):
-    id: str
-    created_at: str
-    voice_file: str | None = None
-    model_status: str = "not_trained"
-
-
-def load_character_config(config_path: Path) -> dict:
+def character_operation(operation):
     try:
-        with config_path.open("r", encoding="utf-8") as file:
-            return json.load(file)
-    except (OSError, json.JSONDecodeError) as error:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not read character configuration: {config_path.name}",
-        ) from error
+        return lifecycle(operation)
+    except CharacterError as error:
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from error
 
 
-@router.post(
-    "",
-    response_model=CharacterResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_character(character: CharacterCreate):
-    character_id = uuid4().hex
-
-    character_directory = CHARACTERS_DIR / character_id
-    character_directory.mkdir(parents=True, exist_ok=False)
-
-    created_at = datetime.now(timezone.utc).isoformat()
-
-    character_data = {
-        "id": character_id,
-        "name": character.name.strip(),
-        "description": character.description.strip(),
-        "system_prompt": character.system_prompt.strip(),
-        "reply_language": character.reply_language.strip(),
-        "translation_language": character.translation_language.strip(),
-        "show_original_text": character.show_original_text,
-        "show_translated_text": character.show_translated_text,
-        "auto_play_voice": character.auto_play_voice,
-        "emotional_responses": character.emotional_responses,
-        "voice_file": None,
-        "model_status": "not_trained",
-        "created_at": created_at,
-    }
-
-    config_path = character_directory / "config.json"
-
-    try:
-        with config_path.open("w", encoding="utf-8") as file:
-            json.dump(
-                character_data,
-                file,
-                ensure_ascii=False,
-                indent=2,
-            )
-    except OSError as error:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not save character configuration.",
-        ) from error
-
-    return character_data
+@router.post("", response_model=CharacterResponse, status_code=201)
+def create_character(character: CharacterCreate, service: CharacterService = Depends(get_character_service)):
+    return character_operation(lambda: service.create(character))
 
 
-@router.get(
-    "",
-    response_model=list[CharacterResponse],
-)
-def list_characters():
-    characters: list[dict] = []
-
-    for character_directory in CHARACTERS_DIR.iterdir():
-        if not character_directory.is_dir():
-            continue
-
-        config_path = character_directory / "config.json"
-
-        if not config_path.exists():
-            continue
-
-        characters.append(load_character_config(config_path))
-
-    characters.sort(
-        key=lambda item: item.get("created_at", ""),
-        reverse=True,
-    )
-
-    return characters
+@router.get("", response_model=list[CharacterResponse])
+def list_characters(service: CharacterService = Depends(get_character_service)):
+    return character_operation(service.list)
 
 
-@router.get(
-    "/{character_id}",
-    response_model=CharacterResponse,
-)
-def get_character(character_id: str):
-    config_path = CHARACTERS_DIR / character_id / "config.json"
+@router.get("/{character_id}", response_model=CharacterResponse)
+def get_character(character_id: str, service: CharacterService = Depends(get_character_service)):
+    return character_operation(lambda: service.get(character_id))
 
-    if not config_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Character not found.",
-        )
 
-    return load_character_config(config_path)
+@router.patch("/{character_id}", response_model=CharacterResponse)
+def update_character(character_id: str, character: CharacterPatch,
+                     service: CharacterService = Depends(get_character_service)):
+    return character_operation(lambda: service.update(character_id, character))
+
+
+@router.post("/{character_id}/synthesize", response_model=SynthesisResult)
+def synthesize_character(character_id: str, request: CharacterSynthesisRequest,
+                         characters: CharacterService = Depends(get_character_service),
+                         synthesis: SynthesisService = Depends(get_synthesis_service)):
+    def operation():
+        character = characters.get(character_id)
+        voice = character["voice_config"]
+        if voice is None:
+            raise CharacterError("Character has no voice binding", 409)
+        # Fresh JSON view is the per-request snapshot, independent of later edits.
+        settings = {key: value for key, value in voice.items() if key != "version"}
+        return synthesis.synthesize(SynthesisRequest(**settings, text=request.text))
+    return character_operation(operation)
