@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from api.characters import router as characters_router
 from api.datasets import router as datasets_router
@@ -11,7 +12,7 @@ from api.training import router as training_router
 from api.transcriptions import router as transcriptions_router
 from api.voices import router as voices_router
 from api.tts import router as tts_router, close_tts_service
-from config import create_project_directories
+from config import create_project_directories, PROJECT_ROOT
 
 
 create_project_directories()
@@ -48,6 +49,7 @@ app.include_router(training_router)
 app.include_router(datasets_router)
 app.include_router(models_router)
 app.include_router(tts_router)
+app.mount("/studio", StaticFiles(directory=PROJECT_ROOT / "frontend", html=True), name="studio")
 
 
 @app.get("/", tags=["System"])

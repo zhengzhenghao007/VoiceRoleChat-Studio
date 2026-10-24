@@ -1,156 +1,61 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-    <title>VoiceRoleChat Studio</title>
-
-    <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VoiceRole 声音工作室</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23196d79'/%3E%3Cpath d='M8 13v6m5-10v14m6-17v20m5-13v6' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
 </head>
-
 <body>
-    <header class="top-bar">
-        <div class="brand">
-            <h1>VoiceRoleChat Studio</h1>
-            <p>Create local AI characters with custom voices and languages.</p>
-        </div>
-
-        <div class="status">
-            <span class="status-dot"></span>
-            Local mode
-        </div>
-    </header>
-
-    <main class="page-container">
-        <section class="hero-card">
-            <div>
-                <span class="tag">Local AI Voice Studio</span>
-
-                <h2>Create a voice-powered AI character</h2>
-
-                <p class="hero-description">
-                    Import audio, configure a character, choose reply and
-                    translation languages, and connect the generated voice
-                    profile to a local AI application.
-                </p>
-            </div>
-
-            <button class="primary-button" id="createCharacterButton">
-                Create new character
-            </button>
-        </section>
-
-        <section class="workflow-section">
-            <h2>Creation workflow</h2>
-
-            <div class="workflow-grid">
-                <article class="workflow-card">
-                    <span class="step-number">01</span>
-                    <h3>Import audio</h3>
-                    <p>
-                        Upload audio files that you have permission to use.
-                    </p>
-                </article>
-
-                <article class="workflow-card">
-                    <span class="step-number">02</span>
-                    <h3>Generate voice model</h3>
-                    <p>
-                        Process the audio and prepare a local voice model.
-                    </p>
-                </article>
-
-                <article class="workflow-card">
-                    <span class="step-number">03</span>
-                    <h3>Configure character</h3>
-                    <p>
-                        Define personality, behaviour and emotional style.
-                    </p>
-                </article>
-
-                <article class="workflow-card">
-                    <span class="step-number">04</span>
-                    <h3>Select languages</h3>
-                    <p>
-                        Choose reply language, translation language and text display.
-                    </p>
-                </article>
-
-                <article class="workflow-card">
-                    <span class="step-number">05</span>
-                    <h3>Export profile</h3>
-                    <p>
-                        Export the voice and character configuration for a local AI app.
-                    </p>
-                </article>
-
-                <article class="workflow-card">
-                    <span class="step-number">06</span>
-                    <h3>Start chatting</h3>
-                    <p>
-                        Use text or speech and automatically play the character response.
-                    </p>
-                </article>
-            </div>
-        </section>
-
-        <section class="settings-preview">
-            <div>
-                <h2>Planned conversation settings</h2>
-                <p>
-                    These controls will become functional during the next development stages.
-                </p>
-            </div>
-
-            <div class="settings-grid">
-                <label>
-                    Character reply language
-                    <select disabled>
-                        <option>Japanese</option>
-                    </select>
-                </label>
-
-                <label>
-                    Translation language
-                    <select disabled>
-                        <option>Chinese</option>
-                    </select>
-                </label>
-
-                <label class="toggle-row">
-                    <input type="checkbox" checked disabled>
-                    Show reply-language text
-                </label>
-
-                <label class="toggle-row">
-                    <input type="checkbox" checked disabled>
-                    Show translated text
-                </label>
-
-                <label class="toggle-row">
-                    <input type="checkbox" checked disabled>
-                    Automatically play voice
-                </label>
-
-                <label class="toggle-row">
-                    <input type="checkbox" checked disabled>
-                    Enable emotional responses
-                </label>
-            </div>
-        </section>
-    </main>
-
-    <footer>
-        <p>
-            VoiceRoleChat Studio runs locally. Use only audio and voice models
-            that you have permission to use.
-        </p>
-    </footer>
-
-    <script src="app.js"></script>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="VoiceRole 声音工作室首页"><span class="brand-mark" aria-hidden="true">声</span><span><strong>VoiceRole</strong><span class="brand-subtitle">本地声音工作室</span></span></a>
+    <div class="connection" id="connection" role="status"><span class="status-dot" aria-hidden="true"></span><span id="connection-text">正在连接后端…</span></div>
+  </header>
+  <main class="workspace">
+    <section class="workspace-heading">
+      <div><h1>角色与声音</h1><p>整理角色，绑定模型，听见它的声音。</p></div>
+      <div class="service-controls"><div><strong id="service-state">正在查询服务…</strong><span id="service-detail" class="muted small"></span></div><button id="start-service" type="button">启动 CPU 服务</button><button id="stop-service" type="button" class="quiet">停止服务</button></div>
+    </section>
+    <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
+    <button id="reload-current" type="button" class="conflict-action" hidden>重新加载角色</button>
+    <nav class="tabs" role="tablist" aria-label="工作区"><button id="tab-characters" role="tab" aria-selected="true" aria-controls="characters-panel">角色</button><button id="tab-models" role="tab" aria-selected="false" aria-controls="models-panel" tabindex="-1">模型</button></nav>
+    <section id="characters-panel" role="tabpanel" aria-labelledby="tab-characters" class="character-layout">
+      <aside class="role-sidebar" aria-label="角色列表">
+        <div class="sidebar-heading"><h2>我的角色</h2><button id="new-character" type="button" class="compact">新建角色</button></div>
+        <p id="characters-loading" class="muted small">正在加载角色…</p>
+        <div id="characters-error" hidden><p class="error-text">角色列表加载失败</p><button id="characters-retry" type="button" class="quiet">重试角色列表</button></div>
+        <ul id="character-list" class="character-list"></ul>
+        <div id="characters-empty" class="empty-state" hidden><strong>还没有角色</strong><p>从右侧填写名称和设定，创建第一个角色。</p></div>
+        <button id="refresh-characters" type="button" class="text-button">刷新列表</button>
+      </aside>
+      <section class="editor-area" aria-label="角色编辑">
+        <div class="editor-heading"><div><span class="small muted" id="editor-context">新角色</span><h2 id="editor-title">创建一个角色</h2></div><span id="draft-state" class="draft-state">尚未保存</span></div>
+        <form id="character-form">
+          <fieldset id="editor-fields">
+            <label for="character-name">角色名称<input id="character-name" name="name" maxlength="100" required autocomplete="off" placeholder="例如：星野"></label>
+            <label for="character-description">角色简介<input id="character-description" name="description" maxlength="1000" placeholder="一句话描述这个角色"></label>
+            <label for="character-prompt">角色提示词<textarea id="character-prompt" name="system_prompt" rows="4" maxlength="10000" required placeholder="它是谁、如何表达、有哪些边界…"></textarea></label>
+            <details class="preferences"><summary>对话偏好<span>保存设置，聊天功能后续接入</span></summary><div class="paired-fields"><label for="reply-language">回复语言<select id="reply-language" aria-label="回复语言" name="reply_language"><option value="English">英语</option><option value="Japanese">日语</option><option value="Chinese">中文</option><option value="Korean">韩语</option></select></label><label for="translation-language">翻译语言<select id="translation-language" aria-label="翻译语言" name="translation_language"><option value="English">英语</option><option value="Chinese">中文</option><option value="Japanese">日语</option><option value="Korean">韩语</option></select></label></div><div class="check-grid"><label class="check"><input type="checkbox" name="show_original_text" checked>显示原文</label><label class="check"><input type="checkbox" name="show_translated_text" checked>显示译文</label><label class="check"><input type="checkbox" name="auto_play_voice" checked>自动播放偏好</label><label class="check"><input type="checkbox" name="emotional_responses" checked>情绪回应偏好</label></div></details>
+            <section class="voice-section" aria-label="角色声音设置"><div class="section-heading"><div><h3>角色声音</h3><p class="small muted">绑定模型和参考音频，保存后用于试听。</p></div><label class="check switch-label"><input type="checkbox" id="voice-enabled">启用角色声音</label></div>
+              <div id="voice-fields" hidden>
+                <label for="voice-model">声音模型<select id="voice-model"><option value="">请选择完整模型</option></select></label><p id="voice-model-hint" class="small muted"></p>
+                <div class="reference-heading"><label for="reference-audio">参考音频路径</label><label class="button-like quiet" for="reference-upload">上传参考 WAV<input type="file" id="reference-upload" accept=".wav,audio/wav" class="file-input"></label></div>
+                <input id="reference-audio" maxlength="1024" placeholder="uploads/…wav 或 datasets/…wav" aria-label="参考音频路径">
+                <p class="small muted">3–10 秒 PCM WAV，最大 10 MiB。上传后仍需保存角色。</p>
+                <label for="reference-text">参考音频文字<textarea id="reference-text" rows="2" maxlength="1000" placeholder="准确填写参考音频里说的话"></textarea></label>
+                <div class="paired-fields"><label for="prompt-language">参考音频语言<select id="prompt-language" aria-label="参考音频语言"></select></label><label for="text-language">合成语言<select id="text-language" aria-label="合成语言"></select></label></div>
+              </div>
+            </section>
+          </fieldset>
+          <div class="save-row"><span id="revision-label" class="small muted"></span><button class="primary" id="save-character" type="submit">保存角色</button></div>
+        </form>
+      </section>
+      <aside class="listening-area" aria-label="声音试听"><div class="listening-heading"><span class="listening-mark" aria-hidden="true">◉</span><h2>听感台</h2></div><p class="muted">用一小段话，确认角色的声音。</p><label for="audition-text">试听文本<textarea id="audition-text" aria-label="试听文本" rows="5" maxlength="1000" placeholder="你好，很高兴认识你。">你好，很高兴认识你。</textarea></label><button id="generate-audio" class="primary audition-button" type="button">生成试听</button><p id="audition-hint" class="small muted">先保存声音绑定，再启动 CPU 服务。</p><div class="audio-result" id="audio-result" hidden><strong id="audio-label"></strong><audio id="result-audio" controls preload="metadata"></audio><div class="audio-meta"><span id="audio-meta" class="small muted"></span><a id="download-audio" download>下载 WAV</a></div></div><div id="audio-empty" class="audio-empty"><span aria-hidden="true">♪</span><p>生成的声音会留在这里。<br>点击播放后即可试听。</p></div><p class="listening-note">只在点击启动后加载本地模型。试听使用已保存的角色配置，不会启动训练。</p></aside>
+    </section>
+    <section id="models-panel" role="tabpanel" aria-labelledby="tab-models" hidden><div class="models-heading"><div><h2>声音模型</h2><p class="muted">查看本地权重配对，选择用于当前角色的声音。</p></div><button id="refresh-models" type="button">刷新模型</button></div><p id="models-summary" class="small muted">正在加载模型…</p><p id="models-error" class="error-text" hidden>模型列表加载失败，请重试刷新。</p><div id="model-list" class="model-list"></div><div id="models-empty" class="empty-state" hidden><strong>还没有发现模型</strong><p>准备好模型权重后，点击刷新模型。已有角色的绑定不会被自动清除。</p></div><p class="small muted model-footnote">文件配对不等于已验证可加载。绑定并生成试听，才能确认当前环境的合成结果。</p></section>
+  </main>
+  <footer>VoiceRole Studio <span>本地角色与声音，由你管理。</span></footer>
 </body>
 </html>
