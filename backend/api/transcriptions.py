@@ -1,4 +1,5 @@
 from fastapi import APIRouter, File, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from schemas.transcription import (
     TranscriptionRequest,
@@ -35,7 +36,7 @@ async def upload_and_transcribe(
 ):
     upload_result = await save_uploaded_audio(file)
 
-    return transcribe_audio(
+    return await run_in_threadpool(transcribe_audio,
         stored_filename=upload_result["stored_filename"],
         language=language,
     )

@@ -1,133 +1,123 @@
+"""Offline, serialized synchronous Whisper transcription and atomic results."""
 import json
+import os
 from pathlib import Path
+import tempfile
 from threading import Lock
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from faster_whisper import WhisperModel
+from faster_whisper.tokenizer import _LANGUAGE_CODES
 
-from config import (
-    TRANSCRIPTS_DIR,
-    UPLOAD_DIR,
-    WHISPER_COMPUTE_TYPE,
-    WHISPER_DEVICE,
-    WHISPER_MODEL_SIZE,
-)
+from config import (TRANSCRIPTS_DIR, UPLOAD_DIR, WHISPER_COMPUTE_TYPE,
+                    WHISPER_DEVICE, WHISPER_MODEL_SIZE)
+from schemas.transcription import TranscriptionResponse, TranscriptionSegment
+from services.audio_service import AudioError, AudioService, NAME
 
-
-_model: WhisperModel | None = None
+_model = None
 _model_lock = Lock()
+_inference_lock = Lock()
 
 
-def get_whisper_model() -> WhisperModel:
+def get_whisper_model():
     global _model
-
     if _model is None:
         with _model_lock:
             if _model is None:
-                _model = WhisperModel(
-                    WHISPER_MODEL_SIZE,
-                    device=WHISPER_DEVICE,
-                    compute_type=WHISPER_COMPUTE_TYPE,
-                )
-
+                try:
+                    candidate = WhisperModel(WHISPER_MODEL_SIZE, device=WHISPER_DEVICE,
+                        compute_type=WHISPER_COMPUTE_TYPE, local_files_only=True)
+                except Exception as error:
+                    raise HTTPException(503, 'Whisper local model is unavailable. Prepare a complete local model/cache and check WHISPER_MODEL_SIZE, device and compute settings; automatic downloads are disabled.') from error
+                _model = candidate
     return _model
 
 
 def validate_stored_filename(stored_filename: str) -> Path:
-    safe_filename = Path(stored_filename).name
-
-    if safe_filename != stored_filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid stored filename.",
-        )
-
-    audio_path = UPLOAD_DIR / safe_filename
-
-    if not audio_path.exists() or not audio_path.is_file():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Uploaded audio file was not found.",
-        )
-
-    return audio_path
+    if not isinstance(stored_filename, str) or not NAME.fullmatch(stored_filename):
+        raise HTTPException(400, 'Invalid stored filename.')
+    try:
+        return AudioService(UPLOAD_DIR).audio_path(stored_filename)
+    except AudioError as error:
+        raise HTTPException(error.status_code, str(error)) from error
 
 
-def transcribe_audio(
-    stored_filename: str,
-    language: str | None = None,
-) -> dict:
+def _save_result(data, filename):
+    directory = Path(TRANSCRIPTS_DIR).resolve()
+    target = directory / filename
+    temporary = None
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        if target.resolve() != target:
+            raise OSError('Unsafe transcript target')
+        encoded = json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False).encode('utf-8')
+        if len(encoded) > 8 * 1024 * 1024:
+            raise ValueError('Transcript exceeds result budget')
+        with tempfile.NamedTemporaryFile(dir=directory, suffix='.tmp', delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        # Recheck after staging; this is a local single-user storage contract.
+        if target.resolve() != target:
+            raise OSError('Unsafe transcript target')
+        os.replace(temporary, target)
+    except (OSError, ValueError) as error:
+        raise HTTPException(500, 'The transcript could not be saved; the previous result was preserved.') from error
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as error:
+                raise HTTPException(500, 'Transcript temporary file cleanup failed; check local storage.') from error
+
+
+def transcribe_audio(stored_filename: str, language: str | None = None) -> dict:
+    if language is not None and language not in _LANGUAGE_CODES:
+        raise HTTPException(422, 'Unsupported transcription language code.')
     audio_path = validate_stored_filename(stored_filename)
-
-    try:
+    transcript_filename = audio_path.stem + '.json'
+    # Hold through lazy decoding, metadata validation and publication, ensuring
+    # same-target requests never race to overwrite out of inference order.
+    with _inference_lock:
         model = get_whisper_model()
-
-        segments_generator, info = model.transcribe(
-            str(audio_path),
-            language=language,
-            beam_size=5,
-            vad_filter=True,
-            word_timestamps=False,
-        )
-
-        segments: list[dict] = []
-        full_text_parts: list[str] = []
-
-        for segment in segments_generator:
-            clean_text = segment.text.strip()
-
-            if not clean_text:
-                continue
-
-            segments.append(
-                {
-                    "start": round(segment.start, 3),
-                    "end": round(segment.end, 3),
-                    "text": clean_text,
-                }
-            )
-
-            full_text_parts.append(clean_text)
-
-    except Exception as error:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Audio transcription failed: {error}",
-        ) from error
-
-    full_text = " ".join(full_text_parts).strip()
-
-    transcript_data = {
-        "stored_filename": stored_filename,
-        "language": info.language,
-        "language_probability": round(
-            info.language_probability,
-            4,
-        ),
-        "duration": round(info.duration, 3),
-        "text": full_text,
-        "segments": segments,
-    }
-
-    transcript_filename = f"{audio_path.stem}.json"
-    transcript_path = TRANSCRIPTS_DIR / transcript_filename
-
-    try:
-        with transcript_path.open("w", encoding="utf-8") as file:
-            json.dump(
-                transcript_data,
-                file,
-                ensure_ascii=False,
-                indent=2,
-            )
-    except OSError as error:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="The transcript could not be saved.",
-        ) from error
-
-    transcript_data["transcript_file"] = (
-        f"transcripts/{transcript_filename}"
-    )
-
-    return transcript_data
+        if language is not None and language not in getattr(model, 'supported_languages', _LANGUAGE_CODES):
+            raise HTTPException(422, 'The local model does not support this language.')
+        try:
+            generator, info = model.transcribe(str(audio_path), language=language,
+                beam_size=5, vad_filter=True, word_timestamps=False)
+            header = TranscriptionResponse(stored_filename=stored_filename,
+                language=info.language, language_probability=info.language_probability,
+                duration=info.duration, text='', segments=[],
+                transcript_file='transcripts/' + transcript_filename)
+            if header.language not in _LANGUAGE_CODES:
+                raise ValueError('Invalid detected language')
+            rows = []
+            characters = 0
+            previous_start = 0.0
+            for index, row in enumerate(generator):
+                if not isinstance(row.text, str):
+                    raise ValueError('Invalid segment text')
+                text = row.text.strip()
+                characters += len(text)
+                if index >= 100000 or characters > 1024 * 1024:
+                    raise ValueError('Transcript exceeds segment/text budget')
+                # Validate even silent rows so malformed timing is not ignored.
+                checked = TranscriptionSegment(start=row.start, end=row.end, text=text)
+                if checked.start < previous_start:
+                    raise ValueError('Segments are not in chronological order')
+                previous_start = checked.start
+                if checked.end > header.duration + .01:
+                    raise ValueError('Segment exceeds audio duration')
+                if text:
+                    rows.append(checked.model_dump())
+            data = TranscriptionResponse(stored_filename=stored_filename,
+                language=header.language, language_probability=header.language_probability,
+                duration=header.duration, text=' '.join(row['text'] for row in rows),
+                segments=rows, transcript_file='transcripts/' + transcript_filename)
+            result = data.model_dump()
+        except Exception as error:
+            raise HTTPException(500, 'Audio transcription failed; check local audio/model compatibility. No result was published.') from error
+        persisted = {key:value for key,value in result.items() if key != 'transcript_file'}
+        _save_result(persisted, transcript_filename)
+        return result
