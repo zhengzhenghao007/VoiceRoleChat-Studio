@@ -1,4 +1,5 @@
 "use strict";
+import { createAudioLibrary } from "./audio.js";
 (() => {
   const $ = (id) => document.getElementById(id);
   const form = $("character-form");
@@ -10,7 +11,9 @@
     show_original_text:true,show_translated_text:true,auto_play_voice:true,emotional_responses:true,voice_config:null};
   const state = {roles:[],models:[],original:null,activeId:null,dirty:false,draftEpoch:0,busy:false,busyKind:"",
     loadingRole:false,selectionToken:0,serviceToken:0,rolesToken:0,modelsToken:0,initialized:false,
-    service:null,connected:false,rolesError:false,modelsError:false};
+    service:null,connected:false,rolesError:false,modelsError:false,recording:false};
+  const tabs = ["characters","models","audio"];
+  let audioLibrary = null;
   const canonical = (value) => JSON.stringify(value, (_, item) => item && typeof item === "object" && !Array.isArray(item)
     ? Object.fromEntries(Object.keys(item).sort().map((key) => [key,item[key]])) : item);
   const equal = (first, second) => canonical(first) === canonical(second);
@@ -55,12 +58,14 @@
     $("reload-current").hidden = true;
   }
   function tab(name) {
-    for (const current of ["characters","models"]) {
+    if (state.recording && name !== "audio") { notice("请先停止录音再切换工作区。"); return; }
+    for (const current of tabs) {
       const selected = current === name;
       $("tab-" + current).setAttribute("aria-selected", String(selected));
       $("tab-" + current).tabIndex = selected ? 0 : -1;
       $(current + "-panel").hidden = !selected;
     }
+    if (name === "audio") audioLibrary?.refresh();
   }
   function chooseValue(select, value) {
     if (![...select.options].some((option) => option.value === value)) select.add(new Option(value, value));
@@ -162,7 +167,7 @@
     return !state.dirty || window.confirm("放弃尚未保存的修改？");
   }
   async function loadRole(id, force = false) {
-    if (state.busy || (!force && id === state.activeId && !state.loadingRole) || !allowDiscard()) return;
+    if (state.busy || state.recording || (!force && id === state.activeId && !state.loadingRole) || !allowDiscard()) return;
     const token = ++state.selectionToken;
     state.loadingRole = true;
     clearAudio(); notice(""); renderControls();
@@ -176,7 +181,7 @@
     }
   }
   function newRole() {
-    if (state.busy || !allowDiscard()) return;
+    if (state.busy || state.recording || !allowDiscard()) return;
     state.selectionToken += 1; state.loadingRole = false;
     applyRole(null); clearAudio(); notice(""); tab("characters"); $("character-name").focus();
   }
@@ -258,7 +263,7 @@
     if (token === state.serviceToken) renderService();
   }
   function renderControls() {
-    const disabled = state.busy || state.loadingRole;
+    const disabled = state.busy || state.loadingRole || state.recording;
     $("editor-fields").disabled = disabled;
     const enabled = $("voice-enabled").checked;
     $("voice-fields").hidden = !enabled;
@@ -275,8 +280,8 @@
     $("draft-state").textContent = state.loadingRole ? "读取中…" : state.dirty ? "有未保存修改" : state.activeId ? "已保存" : "尚未保存";
     $("draft-state").className = "draft-state" + (state.dirty ? " dirty" : "");
     $("revision-label").textContent = state.original ? "修订 " + state.original.revision : "名称与提示词为必填项";
-    for (const id of ["new-character","refresh-characters","characters-retry","refresh-models","reload-current"]) $(id).disabled = state.busy;
-    for (const button of $("character-list").querySelectorAll("button")) button.disabled = state.busy;
+    for (const id of ["new-character","refresh-characters","characters-retry","refresh-models","reload-current"]) $(id).disabled = state.busy || state.recording;
+    for (const button of $("character-list").querySelectorAll("button")) button.disabled = state.busy || state.recording;
     for (const [index,button] of [...$("model-list").querySelectorAll("button")].entries()) button.disabled = disabled || state.models[index]?.status !== "ready";
     const service = state.service;
     $("start-service").disabled = disabled || !state.connected || !service || service.managed || ["ready","starting"].includes(service.state);
@@ -291,9 +296,11 @@
       state.dirty ? "有未保存修改，请先保存后试听。" : !state.activeId ? "先创建并保存一个角色。" :
       !state.original.voice_config ? "先为角色绑定模型和参考音频。" : service?.state === "ready" && !service.managed ? "外部服务仅可查看，请使用工作室托管服务。" :
       !canGenerate ? "启动 CPU 服务后，即可生成试听。" : "使用这个角色已保存的声音配置。";
+    for (const name of tabs) $("tab-"+name).disabled = state.recording && name !== "audio";
+    audioLibrary?.renderControls();
   }
   async function busy(kind, task, onError) {
-    if (state.busy) return;
+    if (state.busy || state.recording) return;
     state.busy = true; state.busyKind = kind; renderControls();
     try { await task(); }
     catch (error) { if (onError) onError(error); else notice(error.message,true); }
@@ -334,7 +341,7 @@
     const selection = state.selectionToken;
     await busy("upload",async () => {
       const body = new FormData(); body.append("file",file);
-      const result = await api("/api/voices/upload",{method:"POST",body},30000);
+      const result = await api("/api/voices/upload",{method:"POST",body},180000);
       if (selection !== state.selectionToken) return;
       if (!/^uploads\/[0-9a-f]{32}\.wav$/i.test(result.file_path)) throw new APIError("上传返回的参考路径无效");
       $("reference-audio").value = result.file_path;
@@ -381,20 +388,30 @@
   $("stop-service").addEventListener("click",() => serviceAction("stop"));
   $("generate-audio").addEventListener("click",generate);
   $("audition-text").addEventListener("input",renderControls);
-  for (const [index,name] of ["characters","models"].entries()) {
+  for (const [index,name] of tabs.entries()) {
     $("tab-" + name).addEventListener("click",() => tab(name));
     $("tab-" + name).addEventListener("keydown",(event) => {
       if (!["ArrowLeft","ArrowRight","Home","End"].includes(event.key)) return;
       event.preventDefault();
-      const target = event.key === "Home" ? "characters" : event.key === "End" ? "models" : ["characters","models"][1-index];
+      const target = event.key === "Home" ? tabs[0] : event.key === "End" ? tabs[tabs.length-1] :
+        tabs[(index+(event.key === "ArrowRight" ? 1 : -1)+tabs.length)%tabs.length];
       tab(target); $("tab-" + target).focus();
     });
   }
   window.addEventListener("beforeunload",(event) => {
-    if (state.dirty) { event.preventDefault(); event.returnValue = ""; }
+    if (state.dirty || audioLibrary?.hasPendingRecording()) { event.preventDefault(); event.returnValue = ""; }
   });
+  audioLibrary=createAudioLibrary({api,jsonRequest,busy,notice,isBusy:()=>state.busy || state.loadingRole,
+    onRecordingChange:(active)=>{state.recording=active;renderControls();},
+    useReference:(path)=>{
+      if (state.busy || state.loadingRole || state.recording || !/^uploads\/[0-9a-f]{32}\.wav$/.test(path)) return;
+      $("voice-enabled").checked=true;
+      if ($("reference-audio").value !== path) $("reference-text").value="";
+      $("reference-audio").value=path;syncDraft(true);tab("characters");$("reference-text").focus();
+      notice("参考音频已填入草稿。请填写对应文字、选择模型并保存角色。");
+    }});
   applyRole(null);
-  Promise.allSettled([refreshRoles(true),refreshModels(),refreshService(),api("/health")]).then(() => {
+  Promise.allSettled([refreshRoles(true),refreshModels(),refreshService(),audioLibrary.refresh(),api("/health")]).then(() => {
     state.initialized = true; renderControls();
   });
   setInterval(() => { if (!state.busy) refreshService(); },10000);

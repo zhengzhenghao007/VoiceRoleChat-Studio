@@ -6,7 +6,7 @@
   <title>VoiceRole 声音工作室</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23196d79'/%3E%3Cpath d='M8 13v6m5-10v14m6-17v20m5-13v6' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
-  <script src="app.js" defer></script>
+  <script src="app.js" type="module"></script>
 </head>
 <body>
   <header class="topbar">
@@ -20,7 +20,7 @@
     </section>
     <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
     <button id="reload-current" type="button" class="conflict-action" hidden>重新加载角色</button>
-    <nav class="tabs" role="tablist" aria-label="工作区"><button id="tab-characters" role="tab" aria-selected="true" aria-controls="characters-panel">角色</button><button id="tab-models" role="tab" aria-selected="false" aria-controls="models-panel" tabindex="-1">模型</button></nav>
+    <nav class="tabs" role="tablist" aria-label="工作区"><button id="tab-characters" role="tab" aria-selected="true" aria-controls="characters-panel">角色</button><button id="tab-models" role="tab" aria-selected="false" aria-controls="models-panel" tabindex="-1">模型</button><button id="tab-audio" role="tab" aria-selected="false" aria-controls="audio-panel" tabindex="-1">音频</button></nav>
     <section id="characters-panel" role="tabpanel" aria-labelledby="tab-characters" class="character-layout">
       <aside class="role-sidebar" aria-label="角色列表">
         <div class="sidebar-heading"><h2>我的角色</h2><button id="new-character" type="button" class="compact">新建角色</button></div>
@@ -55,6 +55,14 @@
       <aside class="listening-area" aria-label="声音试听"><div class="listening-heading"><span class="listening-mark" aria-hidden="true">◉</span><h2>听感台</h2></div><p class="muted">用一小段话，确认角色的声音。</p><label for="audition-text">试听文本<textarea id="audition-text" aria-label="试听文本" rows="5" maxlength="1000" placeholder="你好，很高兴认识你。">你好，很高兴认识你。</textarea></label><button id="generate-audio" class="primary audition-button" type="button">生成试听</button><p id="audition-hint" class="small muted">先保存声音绑定，再启动 CPU 服务。</p><div class="audio-result" id="audio-result" hidden><strong id="audio-label"></strong><audio id="result-audio" controls preload="metadata"></audio><div class="audio-meta"><span id="audio-meta" class="small muted"></span><a id="download-audio" download>下载 WAV</a></div></div><div id="audio-empty" class="audio-empty"><span aria-hidden="true">♪</span><p>生成的声音会留在这里。<br>点击播放后即可试听。</p></div><p class="listening-note">只在点击启动后加载本地模型。试听使用已保存的角色配置，不会启动训练。</p></aside>
     </section>
     <section id="models-panel" role="tabpanel" aria-labelledby="tab-models" hidden><div class="models-heading"><div><h2>声音模型</h2><p class="muted">查看本地权重配对，选择用于当前角色的声音。</p></div><button id="refresh-models" type="button">刷新模型</button></div><p id="models-summary" class="small muted">正在加载模型…</p><p id="models-error" class="error-text" hidden>模型列表加载失败，请重试刷新。</p><div id="model-list" class="model-list"></div><div id="models-empty" class="empty-state" hidden><strong>还没有发现模型</strong><p>准备好模型权重后，点击刷新模型。已有角色的绑定不会被自动清除。</p></div><p class="small muted model-footnote">文件配对不等于已验证可加载。绑定并生成试听，才能确认当前环境的合成结果。</p></section>
+    <section id="audio-panel" role="tabpanel" aria-labelledby="tab-audio" hidden>
+      <div class="models-heading"><div><h2>音频库</h2><p class="muted">保留原音频，检查、试听，再截取合适的参考片段。</p></div><div class="audio-header-actions"><label class="button-like" for="audio-upload">上传音频<input type="file" id="audio-upload" aria-label="上传音频" accept=".wav,.mp3,.m4a,.flac,.ogg,.webm" class="file-input"></label><button id="refresh-audio" type="button">刷新音频</button></div></div>
+      <p class="small muted">支持 WAV、MP3、M4A、FLAC、OGG、WebM，单文件最多 50 MiB。上传后由本地解码器验证。</p>
+      <p id="audio-loading" class="small muted" hidden>正在读取音频库…</p><div id="audio-library-error" class="error-text" hidden>音频库读取失败，请刷新重试。</div>
+      <div class="audio-library-layout"><div><div id="audio-library-list" class="audio-library-list"></div><div id="audio-library-empty" class="empty-state" hidden><strong>还没有音频</strong><p>上传已有音频，或者录一段新的声音。</p></div>
+        <section class="recorder-panel" aria-label="本地录音"><div class="section-heading"><div><h3>录一段声音</h3><p class="small muted">先在本地预览，点击导入后才会保存到音频库。</p></div></div><p id="record-status" role="status">尚未录音</p><p id="record-timer" class="small muted"></p><div class="recorder-actions"><button id="record-start" type="button">开始录音</button><button id="record-stop" type="button" hidden>停止录音</button><button id="record-cancel" type="button" class="quiet" hidden>取消请求</button></div><div id="record-preview-container" hidden><label for="record-preview">录音预览</label><audio id="record-preview" controls preload="metadata" aria-label="录音预览"></audio><div class="recorder-actions"><button id="record-import" type="button" class="primary">导入录音</button><button id="record-discard" type="button" class="quiet">丢弃录音</button></div></div><p class="small muted recorder-footnote">最长 180 秒。停止、取消或离开页面后会释放麦克风。</p></section>
+      </div><aside class="audio-inspector" aria-label="选中音频"><div id="source-empty"><h3>选择一段音频</h3><p class="small muted">查看信息、播放原音频，或生成独立的参考 WAV。</p></div><div id="source-detail" hidden><h3 id="source-name"></h3><p id="source-info" class="small muted"></p><audio id="source-audio" controls preload="metadata" aria-label="原音频试听"></audio><p id="source-validation" class="small muted"></p><button id="inspect-audio" type="button" class="quiet">检查音频</button><div class="clip-section"><h3>生成参考片段</h3><p class="small muted">另存为单声道 32 kHz PCM WAV，原文件保持不变。</p><div class="paired-fields"><label for="clip-start">片段开始（秒）<input id="clip-start" type="number" min="0" max="1800" step="any" value="0" aria-label="片段开始（秒）"></label><label for="clip-end">片段结束（秒）<input id="clip-end" type="number" min="0" max="1800" step="any" value="5" aria-label="片段结束（秒）"></label></div><p id="clip-hint" class="small muted">选择 3–10 秒的范围。</p><button id="create-reference" type="button">生成参考片段</button><button id="use-reference" type="button" class="primary">用于当前角色</button><p class="small muted">仅填入角色草稿，仍需填写参考文字并保存。</p></div></div></aside></div>
+    </section>
   </main>
   <footer>VoiceRole Studio <span>本地角色与声音，由你管理。</span></footer>
 </body>

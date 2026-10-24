@@ -25,6 +25,7 @@ from api.tts import get_tts_service, get_synthesis_service
 from schemas.character import CharacterPatch
 from services.character_service import CharacterService
 from services.tts_service import ProbeResult
+from services.audio_service import AudioError
 import test_synthesis as fixtures
 
 
@@ -68,9 +69,9 @@ def main():
                 time.sleep(.05)
             assert server.started, "Temporary UI backend did not start"
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
+                browser = playwright.chromium.launch(headless=True,args=["--use-fake-device-for-media-stream","--use-fake-ui-for-media-stream"])
                 try:
-                    page = browser.new_page(viewport={"width": 1440, "height": 1050}, device_scale_factor=1)
+                    page = browser.new_page(viewport={"width": 1440, "height": 1050}, device_scale_factor=1,permissions=["microphone"])
                     page.set_default_timeout(8000)
                     expect.set_options(timeout=8000)
                     errors = []
@@ -238,19 +239,92 @@ def main():
                     page.unroute("**/api/characters")
                     page.get_by_role("button", name="重试角色列表", exact=True).click()
                     expect(page.get_by_role("button", name=malicious, exact=True)).to_be_visible()
+
+                    page.get_by_role("tab",name="音频",exact=True).click()
+                    expect(page.get_by_role("heading",name="音频库",exact=True)).to_be_visible()
+                    library_source=fixture.root/"library-source.wav"
+                    library_source.write_bytes(fixtures.pcm(4))
+                    page.get_by_label("上传音频",exact=True).set_input_files(library_source)
+                    expect(page.get_by_role("button",name="library-source.wav",exact=True)).to_be_visible()
+                    page.get_by_role("button",name="library-source.wav",exact=True).click()
+                    expect(page.locator("#source-audio")).to_have_attribute("src",re.compile(r"/api/voices/[0-9a-f]{32}\.wav/audio"))
+                    page.get_by_label("片段开始（秒）",exact=True).fill("0")
+                    page.get_by_label("片段结束（秒）",exact=True).fill("3")
+                    page.get_by_role("button",name="生成参考片段",exact=True).click()
+                    expect(page.locator("#notice")).to_contain_text("参考片段已生成")
+                    page.get_by_role("button",name="用于当前角色",exact=True).click()
+                    expect(page.get_by_label("参考音频路径",exact=True)).to_have_value(re.compile(r"uploads/[0-9a-f]{32}\.wav"))
+                    assert len(store.list())==2,"Reference selection must not silently save a role"
+                    page.once("dialog",lambda dialog:dialog.accept())
+                    page.get_by_role("button",name="新建角色",exact=True).click()
+                    page.get_by_role("tab",name="音频",exact=True).click()
+                    page.evaluate("() => {window.__realMic=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);navigator.mediaDevices.getUserMedia=()=>Promise.reject(new DOMException('denied','NotAllowedError'));}")
+                    page.get_by_role("button",name="开始录音",exact=True).click()
+                    expect(page.locator("#notice")).to_contain_text("麦克风权限被拒绝")
+                    page.evaluate("() => {navigator.mediaDevices.getUserMedia=async (...args)=>{try{const stream=await window.__realMic(...args);window.__recordTestStream=stream;return stream;}catch(error){window.__micError={name:error.name,message:error.message};throw error;}};}")
+                    before_record=len(list((fixture.root/"uploads").glob("*.webm")))
+                    page.get_by_role("button",name="开始录音",exact=True).click()
+                    expect(page.locator("#record-status")).to_have_text("正在录音")
+                    page.wait_for_timeout(1200)
+                    page.get_by_role("button",name="停止录音",exact=True).click()
+                    expect(page.locator("#record-preview")).to_have_attribute("src",re.compile(r"blob:"))
+                    assert page.evaluate("window.__recordTestStream.getTracks().every(track=>track.readyState==='ended')")
+                    assert len(list((fixture.root/"uploads").glob("*.webm")))==before_record,"Preview must not upload automatically"
+                    preview_url=page.locator("#record-preview").get_attribute("src")
+                    async def fail_record_import(service,file):
+                        await file.close()
+                        raise AudioError("simulated import failure",503)
+                    with patch("services.audio_service.AudioService.save_upload",new=fail_record_import):
+                        page.get_by_role("button",name="导入录音",exact=True).click()
+                        expect(page.locator("#notice")).to_contain_text("音频导入失败")
+                        expect(page.locator("#record-preview")).to_have_attribute("src",preview_url)
+                    page.get_by_role("button",name="导入录音",exact=True).click()
+                    expect(page.locator("#notice")).to_contain_text("录音已导入音频库")
+                    assert len(list((fixture.root/"uploads").glob("*.webm")))==before_record+1
+                    page.screenshot(path=str(args.screenshots_dir/"studio-audio-desktop.png"),full_page=True)
+                    page.set_viewport_size({"width":390,"height":844})
+                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"),"Audio mobile overflow"
+                    page.screenshot(path=str(args.screenshots_dir/"studio-audio-mobile.png"),full_page=True)
+                    page.set_viewport_size({"width":1440,"height":1050})
+                    page.clock.install()
+                    page.get_by_role("button",name="开始录音",exact=True).click()
+                    expect(page.locator("#record-status")).to_have_text("正在录音")
+                    page.wait_for_timeout(500)
+                    page.clock.fast_forward(180001)
+                    expect(page.locator("#record-status")).to_have_text("录音完成")
+                    assert page.evaluate("window.__recordTestStream.getTracks().every(track=>track.readyState==='ended')")
+                    page.get_by_role("button",name="丢弃录音",exact=True).click()
+                    expect(page.locator("#record-preview-container")).to_be_hidden()
+                    page.clock.resume()
+                    page.evaluate("() => {navigator.mediaDevices.getUserMedia=()=>new Promise(resolve=>{window.__resolvePendingMic=resolve;});}")
+                    page.get_by_role("button",name="开始录音",exact=True).click()
+                    expect(page.locator("#record-status")).to_have_text("正在请求麦克风")
+                    page.get_by_role("button",name="取消请求",exact=True).click()
+                    page.evaluate("async() => {const stream=await window.__realMic({audio:true});window.__cancelledStream=stream;window.__resolvePendingMic(stream);}")
+                    page.wait_for_function("window.__cancelledStream.getTracks().every(track=>track.readyState==='ended')")
+                    expect(page.locator("#record-status")).to_have_text("尚未录音")
+                    page.evaluate("() => {navigator.mediaDevices.getUserMedia=async(...args)=>{const stream=await window.__realMic(...args);window.__exitStream=stream;return stream;};}")
+                    page.get_by_role("button",name="开始录音",exact=True).click()
+                    expect(page.locator("#record-status")).to_have_text("正在录音")
+                    page.evaluate("window.dispatchEvent(new Event('pagehide'))")
+                    assert page.evaluate("window.__exitStream.getTracks().every(track=>track.readyState==='ended')")
                     assert not errors, errors
                     unexpected_console = [message for message in console_errors if not (
-                        message.startswith("Failed to load resource:") and re.search(r"status of (409|422)|net::ERR_(FAILED|ABORTED)", message))]
+                        message.startswith("Failed to load resource:") and re.search(r"status of (409|422|503)|net::ERR_(FAILED|ABORTED)", message))]
                     assert not unexpected_console, unexpected_console
                     print(json.dumps({"status": "PASS", "checks": ["create/edit/reload", "upload/bind",
                         "service start/stop", "audition/audio", "revision conflict", "missing model preservation",
                         "dirty confirmation", "pending draft", "role request identity", "safe DOM", "offline retry", "mobile overflow",
-                        "incomplete model", "invalid WAV/422 draft", "unmanaged service", "busy controls", "keyboard tabs", "no unexpected console/page errors"],
+                        "incomplete model", "invalid WAV/422 draft", "unmanaged service", "busy controls", "keyboard tabs",
+                        "audio upload/library/playback/clip to draft", "microphone denied", "fake recording preview/import/track cleanup",
+                        "180-second virtual auto-stop", "failed import retains preview", "cancel pending permission", "page-exit track cleanup",
+                        "audio mobile", "no unexpected console/page errors"],
                         "screenshots": str(args.screenshots_dir)}, ensure_ascii=False), flush=True)
                 except Exception:
                     try:
                         page.screenshot(path=str(args.screenshots_dir / "studio-failure.png"), full_page=True)
                         print(page.locator("body").inner_text()[-5000:], flush=True)
+                        print("microphone diagnostic:",page.evaluate("window.__micError || null"),flush=True)
                     except Exception: pass
                     raise
                 finally: browser.close()

@@ -92,6 +92,7 @@ ALLOWED_AUDIO_EXTENSIONS = {
     ".m4a",
     ".flac",
     ".ogg",
+    ".webm",
 }
 
 MAX_AUDIO_FILE_SIZE = 50 * 1024 * 1024
@@ -128,6 +129,7 @@ GPT_SOVITS_REQUEST_TIMEOUT = env_timeout("GPT_SOVITS_REQUEST_TIMEOUT", "2", 30)
 GPT_SOVITS_START_TIMEOUT = env_timeout("GPT_SOVITS_START_TIMEOUT", "120", 600)
 GPT_SOVITS_STOP_TIMEOUT = env_timeout("GPT_SOVITS_STOP_TIMEOUT", "10", 60)
 GPT_SOVITS_SYNTHESIS_TIMEOUT = env_timeout("GPT_SOVITS_SYNTHESIS_TIMEOUT", "180", 600)
+AUDIO_PROCESS_TIMEOUT = env_timeout("AUDIO_PROCESS_TIMEOUT", "30", 120)
 
 
 def create_project_directories() -> None:
