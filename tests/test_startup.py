@@ -19,7 +19,7 @@ import run
 CONFIG_ENV = ("GPT_SOVITS_ROOT", "GPT_SOVITS_PYTHON", "GPT_SOVITS_VERSION",
               "GPT_SOVITS_GPU", "WHISPER_MODEL_SIZE", "WHISPER_DEVICE", "WHISPER_COMPUTE_TYPE",
               "GPT_SOVITS_API_PORT", "GPT_SOVITS_REQUEST_TIMEOUT", "GPT_SOVITS_START_TIMEOUT",
-              "GPT_SOVITS_STOP_TIMEOUT")
+              "GPT_SOVITS_STOP_TIMEOUT", "GPT_SOVITS_SYNTHESIS_TIMEOUT")
 
 
 def environment(**overrides):
@@ -85,6 +85,7 @@ class StartupTests(unittest.TestCase):
                          {"GPT_SOVITS_API_PORT": "0"}, {"GPT_SOVITS_API_PORT": "65536"},
                          {"GPT_SOVITS_REQUEST_TIMEOUT": "nan"}, {"GPT_SOVITS_START_TIMEOUT": "inf"},
                          {"GPT_SOVITS_STOP_TIMEOUT": "0"}, {"GPT_SOVITS_STOP_TIMEOUT": "61"},
+                         {"GPT_SOVITS_SYNTHESIS_TIMEOUT": "nan"}, {"GPT_SOVITS_SYNTHESIS_TIMEOUT": "601"},
                          {"WHISPER_COMPUTE_TYPE": "invalid"}):
             with self.subTest(override=override):
                 result = self.cli("--check", "--json", env=environment(**override))

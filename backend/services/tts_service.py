@@ -1,5 +1,6 @@
 """Bounded local API probing and lifecycle management of owned children only."""
 from dataclasses import dataclass
+from contextlib import contextmanager
 import http.client
 import json
 import os
@@ -91,6 +92,7 @@ class TTSSettings:
     request_timeout: float = 2
     start_timeout: float = 120
     stop_timeout: float = 10
+    synthesis_timeout: float = 180
 
     @classmethod
     def from_config(cls):
@@ -100,7 +102,8 @@ class TTSSettings:
             bert=config.GPT_SOVITS_BERT_DIR, hubert=config.GPT_SOVITS_HUBERT_DIR,
             output_root=config.OUTPUTS_DIR / "tts-service", port=config.GPT_SOVITS_API_PORT,
             request_timeout=config.GPT_SOVITS_REQUEST_TIMEOUT,
-            start_timeout=config.GPT_SOVITS_START_TIMEOUT, stop_timeout=config.GPT_SOVITS_STOP_TIMEOUT)
+            start_timeout=config.GPT_SOVITS_START_TIMEOUT, stop_timeout=config.GPT_SOVITS_STOP_TIMEOUT,
+            synthesis_timeout=config.GPT_SOVITS_SYNTHESIS_TIMEOUT)
 
 
 class TTSService:
@@ -248,8 +251,39 @@ class TTSService:
         finally:
             self._operation.release()
 
+    @contextmanager
+    def inference_session(self):
+        """Keep pair selection/inference atomic with respect to start and stop."""
+        if not self._operation.acquire(blocking=False):
+            raise ServiceConflict("Another service lifecycle or synthesis operation is in progress")
+        deadline = time.monotonic() + self.settings.synthesis_timeout
+        try:
+            self._reap()
+            with self._guard:
+                process = self._process
+                state = self._state
+            if process is None or state != "ready":
+                raise ServiceUnavailable("Start an owned ready service before synthesizing")
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ServiceTimeout("Synthesis deadline exceeded")
+                result = self._probe(self.settings.port, min(self.settings.request_timeout, remaining))
+                if time.monotonic() >= deadline:
+                    raise ServiceTimeout("Synthesis deadline exceeded")
+                if not result.ready or process.poll() is not None:
+                    raise ServiceUnavailable("Owned inference service is not ready")
+                yield deadline
+            except ServiceUnavailable as error:
+                # A timed-out HTTP request may still be executing upstream.
+                self._cleanup()
+                self._set_state("failed", str(error))
+                raise
+        finally:
+            self._operation.release()
+
     def close(self):
-        limit = self.settings.start_timeout + self.settings.request_timeout + 2 * self.settings.stop_timeout
+        limit = max(self.settings.start_timeout, self.settings.synthesis_timeout) + self.settings.request_timeout + 2 * self.settings.stop_timeout
         if not self._operation.acquire(timeout=limit):
             raise ServiceTimeout("Shutdown could not acquire lifecycle operation lock")
         try:

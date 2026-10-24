@@ -2,7 +2,7 @@
 
 本地优先的 AI 角色语音工作室：围绕角色配置、音频转写、声音训练和模型管理，逐步实现支持多语言字幕与角色声音的对话体验。
 
-**当前处于开发阶段。** 后端基础 API 和模型注册已通过实际测试；前端仍是静态原型。LLM 对话、TTS 合成接口和实时语音聊天尚未实现，不能将本仓库视为已完成的聊天产品。
+**当前处于开发阶段。** 后端基础 API、模型注册和最小文本合成已通过实际测试；前端仍是静态原型。LLM 对话和实时语音聊天尚未实现，不能将本仓库视为已完成的聊天产品。
 
 ## 功能现状
 
@@ -15,7 +15,8 @@
 | 数据集 | 从音频和转写生成 GPT-SoVITS 标注 | 已有实现；逐段校对、切片与质量检查待开发 |
 | 训练 | 后台任务、状态记录和 GPT-SoVITS Worker | 已有训练产物；本轮未重跑 GPU 训练 |
 | 模型管理 | 权重配对、版本选择、导出发现、来源去重、ID 冲突处理 | 已有专项回归与真实列表/详情/刷新测试 |
-| 推理服务管理 | 状态探测、自有进程启停、超时和正常退出清理 | 假 HTTP 与真实轻量子进程已验证；尚未启动真实模型验收 |
+| 推理服务管理 | 状态探测、自有进程启停、超时和正常退出清理 | 已验证真实 CPU 模型启动及清理 |
+| 文本合成 | 模型权重串行选择、参考 WAV 校验、WAV 生成与读取 | 已用已有日语模型执行真实离线 CPU 合成；其他语言与长文本待验证 |
 | 前端 | 页面结构和流程展示 | 静态原型，尚未接入业务 API |
 | 角色聊天 | LLM、会话历史、双语回复和语音播放 | 规划中 |
 
@@ -44,7 +45,7 @@
 - 当前主要开发平台：Windows / PowerShell。
 - Python **3.10 或更新版本**；已在 Python 3.10.20 和 3.12.8 的现有环境测试后端。
 - 后端依赖见 [backend/requirements.txt](backend/requirements.txt)。
-- 训练与未来推理需要单独准备 GPT-SoVITS、对应的依赖及模型权重；仅安装后端依赖不会完成这些步骤。
+- 训练与推理需要单独准备 GPT-SoVITS、对应的依赖及模型权重；仅安装后端依赖不会完成这些步骤。
 - 本仓库不附带声音样本、模型权重、Conda 环境或训练数据。
 
 ### 安装后端依赖
@@ -121,6 +122,7 @@ python -m http.server 8080 --bind 127.0.0.1 --directory frontend
 | `GPT_SOVITS_REQUEST_TIMEOUT` | `2` 秒；大于 0、最多 30 秒，单次探测总时限 |
 | `GPT_SOVITS_START_TIMEOUT` | `120` 秒；大于 0、最多 600 秒，启动就绪等待时限 |
 | `GPT_SOVITS_STOP_TIMEOUT` | `10` 秒；大于 0、最多 60 秒，停止等待总预算 |
+| `GPT_SOVITS_SYNTHESIS_TIMEOUT` | `180` 秒；大于 0、最多 600 秒，状态验证、权重切换与合成共享期限 |
 | `WHISPER_MODEL_SIZE` | `small`；模型名称或模型标识 |
 | `WHISPER_DEVICE` | `cpu`；可选 `cpu`、`cuda`、`auto` |
 | `WHISPER_COMPUTE_TYPE` | `int8`；如 `float32`、`float16`、`auto` 等受支持类型；硬件兼容性在实际加载时判断 |
@@ -158,7 +160,34 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/tts/service/stop
 
 **仅支持一个业务后端进程**，不要使用多个 Uvicorn worker 或同时运行多个工作室后端。
 正常退出会清理自有子进程；强制结束后端、系统崩溃不保证清理。当前按上游单服务进程管理，不负责其自行派生的孙进程，也不会根据进程名或 PID 文件接管遗留进程。
-真实 GPT-SoVITS 启动、模型切换和声音合成留到下一项验证；本轮没有完成语音生成接口。
+合成接口只允许操作工作室托管的就绪服务；手动启动的外部服务仍保持只读检测。
+
+### 文本合成与试听
+
+先在 `/api/models` 选取 `ready` 模型，上传或准备一段 **3–10 秒 PCM WAV** 参考音频，并确认其对应文本。参考路径只能位于项目 `uploads/` 或 `datasets/` 中，不接受绝对路径或 `..`。
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/tts/service/start
+$request = @{
+    model_id = '<从模型列表复制 ID>'
+    text = 'こんにちは。'
+    text_lang = 'ja'
+    reference_audio = 'uploads/<已上传的参考音频>.wav'
+    prompt_text = '<参考音频中的准确文本>'
+    prompt_lang = 'ja'
+} | ConvertTo-Json
+$result = Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/tts/synthesize `
+    -ContentType 'application/json; charset=utf-8' -Body ([System.Text.Encoding]::UTF8.GetBytes($request))
+$result
+Invoke-WebRequest ('http://127.0.0.1:8000' + $result.audio_url) -OutFile "$env:TEMP\voicerolechat-demo.wav"
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/tts/service/stop
+```
+
+文本和参考文本各 1–1000 字符，参考 WAV 最大 10 MiB。语言支持上游 v2 代码 `zh/ja/en/ko/yue/all_zh/all_ja/all_ko/all_yue/auto/auto_yue`，模型是否擅长该语言需实际验证。
+服务在一把锁内依次选择 GPT、SoVITS 权重，再完成非流式合成；并发合成或启停返回 409。模型不存在为 404，模型不完整为 409，非法请求/参考音频为 422，未托管或未就绪为 503，上游异常为 502，超时为 504。
+不确定的上游失败会清理自有进程，需要显式重新启动后重试，以免迟到的请求影响下一次选择。
+结果包含 `id/model_id/audio_url/sample_rate/duration_seconds`，校验后的 WAV 原子保存到 `outputs/tts/`，最大 32 MiB。参考音频使用临时快照，不修改原文件；读取接口只开放合法生成 ID。
+已验证一条日语短句的 CPU 合成和非静音 WAV；这不代表全部模型、语言、硬件或声音质量已通过验收。
 
 ## 模型目录与 API 行为
 
@@ -197,6 +226,8 @@ models/<job_id>/manifest.json      # 导出记录与对应权重
 | GET | `/api/tts/service` | 本地 GPT-SoVITS 服务状态 |
 | POST | `/api/tts/service/start` | 显式启动自有 CPU 服务 |
 | POST | `/api/tts/service/stop` | 停止自有服务 |
+| POST | `/api/tts/synthesize` | 选择模型对并合成 WAV |
+| GET | `/api/tts/audio/{audio_id}` | 读取已生成 WAV |
 
 请求体及上传格式以运行中的 `/docs` 为准。训练接口不是普通健康检查，不要将它加入自动冒烟测试。
 
@@ -209,13 +240,13 @@ models/<job_id>/manifest.json      # 导出记录与对应权重
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-测试使用临时空文件验证注册逻辑，不加载真实模型，也不会启动 GPU 训练。
+常规测试使用临时空文件、假 HTTP 服务和轻量子进程，不加载真实模型，也不会启动 GPU 训练。真实 CPU 验收单独执行并记录。
 部分测试只读访问当前本地角色和模型记录，因此本地损坏的配置文件可能影响测试结果。
 
 开发依赖声明固定了 `httpx==0.28.1`；这不是完整的运行时或传递依赖锁文件，也不是全新环境安装验收。
-最近验证：两套现有 Python 环境均运行 **44 项测试：43 项通过、1 项跳过**，包括其他工作目录下通过 `run.py` 启动真实 HTTP 服务及轻量子进程启停。
+最近验证：两套现有 Python 环境均运行 **61 项测试：60 项通过、1 项跳过**，包括真实 HTTP 启动、合成事务、错误清理和 WAV 读取。
 跳过项是需要额外 Windows 权限的真实符号链接测试；另有模拟路径解析逃逸测试通过。
-这不是全新环境安装或 GPU 推理的完整验收。详见 [C2C-001 审计](docs/C2C-001-audit.md)、[C2C-002 实现记录](docs/C2C-002-results.md)、[C2C-003 启动验证](docs/C2C-003-results.md) 和 [C2C-004 服务管理](docs/C2C-004-results.md)。
+这不是全新环境安装或 GPU 推理的完整验收。详见 [C2C-001 审计](docs/C2C-001-audit.md)、[C2C-002 实现记录](docs/C2C-002-results.md)、[C2C-003 启动验证](docs/C2C-003-results.md)、[C2C-004 服务管理](docs/C2C-004-results.md) 和 [C2C-005 合成验证](docs/C2C-005-results.md)。
 
 ## 仓库结构与本地数据
 
@@ -243,7 +274,7 @@ GPT-SoVITS/     用户单独准备的外部安装
 - **`No module named 'api'`**：从根目录启动时加入 `--app-dir backend`。
 - **`No module named 'faster_whisper'` 或上传依赖缺失**：确认安装依赖和启动服务使用同一个 Python 解释器。
 - **模型列表为空**：仓库不附带权重；检查上述目录、文件命名及 manifest 告警。
-- **模型显示 ready 但不能发声**：当前没有完成 TTS API，文件配对检查也没有验证模型字节或推理兼容性。
+- **模型显示 ready 但不能发声**：模型列表只检查文件配对；确认已启动托管服务、权重可以加载、参考 WAV 及文本有效，并查看服务日志。
 - **训练启动失败**：核对 `GPT_SOVITS_PYTHON`、外部安装和预训练文件，查看 `training_jobs/` 中的日志；不要直接删除原有产物。
 - **测试在受限环境挂起**：曾观察到 Windows 沙箱中的异步本机套接字初始化受限；请在允许本机通信的开发终端运行，并区分环境故障与代码失败。
 
