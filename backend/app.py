@@ -14,6 +14,7 @@ from api.voices import router as voices_router
 from api.tts import router as tts_router, close_tts_service
 from config import create_project_directories, PROJECT_ROOT
 from services.segmented_dataset_service import cleanup_retained
+from services.training_command import start_training_commands,close_training_commands
 
 
 create_project_directories()
@@ -21,16 +22,20 @@ create_project_directories()
 
 @asynccontextmanager
 async def lifespan(app):
+    start_training_commands()
     try:
         yield
     finally:
         try:
-            await run_in_threadpool(close_jobs)
+            await run_in_threadpool(close_training_commands)
         finally:
             try:
-                await run_in_threadpool(cleanup_retained)
+                await run_in_threadpool(close_jobs)
             finally:
-                await run_in_threadpool(close_tts_service)
+                try:
+                    await run_in_threadpool(cleanup_retained)
+                finally:
+                    await run_in_threadpool(close_tts_service)
 
 
 app = FastAPI(

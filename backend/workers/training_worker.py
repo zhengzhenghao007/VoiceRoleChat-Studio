@@ -100,37 +100,8 @@ def run_command(
     environment: dict[str, str],
     log_path: Path,
 ) -> None:
-    with log_path.open(
-        "a",
-        encoding="utf-8",
-        errors="replace",
-    ) as log_file:
-        log_file.write(
-            "\n\n==================================================\n"
-        )
-        log_file.write("COMMAND:\n")
-        log_file.write(
-            subprocess.list2cmdline(command) + "\n"
-        )
-        log_file.flush()
-
-        process = subprocess.Popen(
-            command,
-            cwd=str(GPT_SOVITS_ROOT),
-            env=environment,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-
-        return_code = process.wait()
-
-    if return_code != 0:
-        raise RuntimeError(
-            "GPT-SoVITS command failed. "
-            f"Exit code: {return_code}. "
-            f"See log: {log_path}"
-        )
+    from services.training_command import run_training_command
+    run_training_command(command,environment=environment,log_path=log_path)
 
 
 def merge_text_outputs(
