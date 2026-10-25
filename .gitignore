@@ -278,3 +278,6 @@ datasets/
 .env
 .env.*
 !.env.example
+
+# Private conversation database and any SQLite sidecars
+sessions/

@@ -9,6 +9,7 @@ from api.characters import router as characters_router
 from api.datasets import router as datasets_router
 from api.models import router as models_router
 from api.llm import router as llm_router
+from api.sessions import router as sessions_router
 from api.training import router as training_router, start_training_queue, close_training_queue
 from api.transcriptions import router as transcriptions_router, close_jobs
 from api.voices import router as voices_router
@@ -67,6 +68,7 @@ app.include_router(datasets_router)
 app.include_router(models_router)
 app.include_router(tts_router)
 app.include_router(llm_router)
+app.include_router(sessions_router)
 app.mount("/studio", StaticFiles(directory=PROJECT_ROOT / "frontend", html=True), name="studio")
 
 
