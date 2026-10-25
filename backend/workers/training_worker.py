@@ -312,10 +312,7 @@ def train_sovits(
     )
 
     config["save_weight_dir"] = str(
-        (
-            GPT_SOVITS_ROOT
-            / "SoVITS_weights_v2Pro"
-        ).resolve()
+        (work_directory / "weights" / "sovits").resolve()
     )
 
     config["name"] = experiment_name
@@ -385,10 +382,7 @@ def train_gpt(
     config["train"][
         "half_weights_save_dir"
     ] = str(
-        (
-            GPT_SOVITS_ROOT
-            / "GPT_weights_v2Pro"
-        ).resolve()
+        (work_directory / "weights" / "gpt").resolve()
     )
 
     config["train"]["exp_name"] = (
@@ -473,17 +467,16 @@ def export_models(
     job_id: str,
     experiment_name: str,
     metadata: dict,
-    *, reserved=False,
+    *, reserved=False, source_directories=None,
 ) -> Path:
+    sovits_root,gpt_root = source_directories or (GPT_SOVITS_ROOT/'SoVITS_weights_v2Pro',GPT_SOVITS_ROOT/'GPT_weights_v2Pro')
     sovits_source = newest_matching_file(
-        GPT_SOVITS_ROOT
-        / "SoVITS_weights_v2Pro",
+        sovits_root,
         f"{experiment_name}_*.pth",
     )
 
     gpt_source = newest_matching_file(
-        GPT_SOVITS_ROOT
-        / "GPT_weights_v2Pro",
+        gpt_root,
         f"{experiment_name}-*.ckpt",
     )
 
@@ -521,6 +514,7 @@ def export_models(
     manifest = {
         **metadata,
         "job_id": job_id,
+        "experiment_name": experiment_name,
         "version": "v2Pro",
         "gpt_model": str(gpt_target),
         "sovits_model": str(sovits_target),
@@ -538,7 +532,9 @@ def export_models(
     return model_directory
 
 
-def run_training_job(job_id: str) -> None:
+def run_training_job(job_id: str, *, runtime=None) -> None:
+    get_job=runtime.load if runtime else get_training_job
+    update_job=runtime.update if runtime else update_training_job
     log_path = (
         TRAINING_JOBS_DIR
         / f"{job_id}.log"
@@ -546,7 +542,7 @@ def run_training_job(job_id: str) -> None:
 
     try:
         with _training_lock:
-            job_data = get_training_job(job_id)
+            job_data = get_job(job_id)
             if job_data.get('status','queued')!='queued':
                 return
             log_path=safe(TRAINING_JOBS_DIR/(job_id+'.log'))
@@ -558,7 +554,7 @@ def run_training_job(job_id: str) -> None:
                 job_id,
             )
 
-            update_training_job(
+            update_job(
                 job_id,
                 job_status="preparing",
                 progress=5,
@@ -573,18 +569,20 @@ def run_training_job(job_id: str) -> None:
                 prepared=validate_prepared_dataset(DATASETS_DIR,request.dataset_name,request.character_id)
             else:
                 prepared=None
-            for root,pattern in ((GPT_SOVITS_ROOT/'GPT_weights_v2Pro',experiment_name+'-*'),
-                                 (GPT_SOVITS_ROOT/'SoVITS_weights_v2Pro',experiment_name+'_*')):
+            for root,pattern in (() if runtime else ((GPT_SOVITS_ROOT/'GPT_weights_v2Pro',experiment_name+'-*'),
+                                 (GPT_SOVITS_ROOT/'SoVITS_weights_v2Pro',experiment_name+'_*'))):
                 safe(root)
                 if list(root.glob(pattern)):raise FileExistsError('Existing experiment weights preserved')
-            experiment_directory=exclusive_directory(GPT_SOVITS_ROOT/'logs',experiment_name)
+            experiment_directory=exclusive_directory(runtime.experiment_root if runtime else GPT_SOVITS_ROOT/'logs',experiment_name)
             work_directory=exclusive_directory(TRAINING_JOBS_DIR,job_id)
+            weights=exclusive_directory(work_directory,'weights')
+            exclusive_directory(weights,'gpt');exclusive_directory(weights,'sovits')
             exclusive_directory(MODELS_DIR,job_id)
             if prepared:
                 dataset_directory,audio_directory,annotation_path,metadata=create_verified_training_snapshot(
                     DATASETS_DIR,request.dataset_name,request.character_id,TRAINING_JOBS_DIR,job_id)
             else:
-                dataset_directory,audio_directory,annotation_path,metadata=prepare_dataset(job_data,experiment_name)
+                dataset_directory,audio_directory,annotation_path,metadata=(runtime.prepare_legacy(job_data,experiment_name,work_directory) if runtime else prepare_dataset(job_data,experiment_name))
 
             environment = (
                 build_preprocessing_environment(
@@ -595,7 +593,7 @@ def run_training_job(job_id: str) -> None:
                 )
             )
 
-            update_training_job(
+            update_job(
                 job_id,
                 progress=12,
                 current_step=(
@@ -621,7 +619,7 @@ def run_training_job(job_id: str) -> None:
                 experiment_directory
             )
 
-            update_training_job(
+            update_job(
                 job_id,
                 progress=25,
                 current_step=(
@@ -643,7 +641,7 @@ def run_training_job(job_id: str) -> None:
                 log_path=log_path,
             )
 
-            update_training_job(
+            update_job(
                 job_id,
                 progress=35,
                 current_step=(
@@ -665,7 +663,7 @@ def run_training_job(job_id: str) -> None:
                 log_path=log_path,
             )
 
-            update_training_job(
+            update_job(
                 job_id,
                 progress=45,
                 current_step=(
@@ -691,7 +689,7 @@ def run_training_job(job_id: str) -> None:
                 experiment_directory
             )
 
-            update_training_job(
+            update_job(
                 job_id,
                 job_status="training",
                 progress=55,
@@ -707,7 +705,7 @@ def run_training_job(job_id: str) -> None:
                 log_path,
             )
 
-            update_training_job(
+            update_job(
                 job_id,
                 progress=78,
                 current_step="Training GPT v2Pro",
@@ -720,7 +718,7 @@ def run_training_job(job_id: str) -> None:
                 log_path,
             )
 
-            update_training_job(
+            update_job(
                 job_id,
                 progress=95,
                 current_step=(
@@ -744,9 +742,10 @@ def run_training_job(job_id: str) -> None:
                     ),
                 },
                 reserved=True,
+                source_directories=(work_directory/'weights/sovits',work_directory/'weights/gpt'),
             )
 
-            update_training_job(
+            update_job(
                 job_id,
                 job_status="completed",
                 progress=100,
@@ -760,7 +759,7 @@ def run_training_job(job_id: str) -> None:
 
     except Exception as error:
         try:
-            update_training_job(
+            update_job(
                 job_id,
                 job_status="failed",
                 current_step="Training failed",

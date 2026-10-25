@@ -111,25 +111,32 @@ class TrainingSafetyTests(unittest.TestCase):
         with patch.object(Path,'mkdir',race),self.assertRaises(FileExistsError):exclusive_directory(self.datasets,'raced')
         self.assertEqual((target/'keep').read_text(),'racer')
         with patch.object(Path,'resolve',side_effect=RuntimeError('loop')),self.assertRaises(Exception):exclusive_directory(self.datasets,'loop')
-    def test_training_api_validates_before_thread_and_legacy_records(self):
+    def test_training_api_validates_before_queue_and_legacy_records(self):
         from fastapi.testclient import TestClient
         from fastapi import FastAPI
         from api import training
-        from services import training_service
-        app=FastAPI();app.include_router(training.router)
-        with patch.multiple(training_service,CHARACTERS_DIR=self.fixture.characters,DATASETS_DIR=self.datasets,UPLOAD_DIR=self.fixture.uploads,TRANSCRIPTS_DIR=self.fixture.records,TRAINING_JOBS_DIR=self.jobs),patch.object(training,'Thread') as thread,TestClient(app) as client:
+        from schemas.training_queue import RuntimeConfig
+        from services.training_queue import TrainingQueue
+        import config
+        runtime={key:str(getattr(config,key)) for key in RuntimeConfig.model_fields}
+        runtime.update(CHARACTERS_DIR=str(self.fixture.characters),DATASETS_DIR=str(self.datasets),UPLOAD_DIR=str(self.fixture.uploads),TRANSCRIPTS_DIR=str(self.fixture.records),TRAINING_JOBS_DIR=str(self.jobs))
+        queue=TrainingQueue(self.jobs,self.models,runtime,autostart=False);self.addCleanup(queue.close)
+        app=FastAPI();app.include_router(training.router);app.dependency_overrides[training.get_training_queue]=lambda:queue
+        with TestClient(app) as client:
             response=client.post('/api/training/start',json=dict(character_id='actor',model_name='test',dataset_name='prepared'))
-            self.assertEqual(response.status_code,201,response.text);thread.return_value.start.assert_called_once()
+            self.assertEqual(response.status_code,201,response.text);self.assertIsNone(queue._worker)
             job=response.json();self.assertEqual(job['dataset_name'],'prepared')
             self.assertEqual(client.get('/api/training/'+job['job_id']).status_code,200)
-            thread.reset_mock()
+            before=len(queue.list())
             for change in [dict(dataset_name='missing'),dict(dataset_name='prepared',engine='cosyvoice'),dict(dataset_name='../bad'),dict(stored_filename='../bad',transcript_filename='x.json')]:
                 response=client.post('/api/training/start',json=dict(character_id='actor',model_name='test',**change))
                 self.assertEqual(response.status_code,422,response.text)
-            thread.assert_not_called()
+            self.assertEqual(len(queue.list()),before);self.assertIsNone(queue._worker)
             response=client.post('/api/training/start',json={key:self.job[key] for key in ('character_id','model_name','stored_filename','transcript_filename')})
             self.assertEqual(response.status_code,201,response.text)
-            old=dict(response.json());old.pop('dataset_name');(self.jobs/(old['job_id']+'.json')).write_text(json.dumps(old),encoding='utf8')
+            old=dict(response.json());old['job_id']='e'*32
+            for key in ('dataset_name','schema_version','decision','error_code'):old.pop(key,None)
+            (self.jobs/(old['job_id']+'.json')).write_text(json.dumps(old),encoding='utf8')
             self.assertIsNone(client.get('/api/training/'+old['job_id']).json()['dataset_name'])
 
 if __name__=='__main__':unittest.main()

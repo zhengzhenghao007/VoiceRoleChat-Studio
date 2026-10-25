@@ -4,7 +4,7 @@ from pydantic import BaseModel,Field,ConfigDict,model_validator
 from schemas.segmented_dataset import SegmentDatasetRequest
 
 TrainingEngine=Literal['gpt_sovits','cosyvoice']
-TrainingStatus=Literal['queued','preparing','training','completed','failed','cancelled']
+TrainingStatus=Literal['queued','preparing','training','completed','failed','cancelled','timed_out','interrupted']
 class TrainingRequest(BaseModel):
     model_config=ConfigDict(extra='forbid')
     character_id:str=Field(pattern=r'^[A-Za-z0-9_-]{1,100}$')
@@ -28,6 +28,9 @@ class TrainingRequest(BaseModel):
                 except Exception as error:raise ValueError('Invalid input filename') from error
         return self
 class TrainingJobResponse(BaseModel):
+    schema_version:int=0
+    decision:Literal['cancelled','timed_out','interrupted']|None=None
+    error_code:str|None=None
     job_id:str
     character_id:str
     engine:TrainingEngine
