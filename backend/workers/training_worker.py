@@ -76,7 +76,8 @@ def write_json(path: Path, data: dict) -> None:
 def create_process_environment() -> dict[str, str]:
     environment = os.environ.copy()
 
-    conda_prefix = GPT_SOVITS_PYTHON.parent.parent
+    python_directory=GPT_SOVITS_PYTHON.parent
+    conda_prefix=python_directory.parent if python_directory.name.lower() in ('scripts','bin') else python_directory
     conda_library_bin = conda_prefix / "Library" / "bin"
     conda_dlls = conda_prefix / "DLLs"
 
@@ -264,7 +265,10 @@ def train_sovits(
     experiment_directory: Path,
     work_directory: Path,
     log_path: Path,
+    *, options=None,
 ) -> None:
+    from schemas.training import TrainingOptions
+    options=options or TrainingOptions()
     template_path = (
         GPT_SOVITS_ROOT
         / "GPT_SoVITS"
@@ -283,8 +287,8 @@ def train_sovits(
         exist_ok=True,
     )
 
-    config["train"]["batch_size"] = 2
-    config["train"]["epochs"] = 8
+    config["train"]["batch_size"] = options.batch_size
+    config["train"]["epochs"] = options.sovits_epochs
     config["train"]["text_low_lr_rate"] = 0.4
     config["train"]["pretrained_s2G"] = str(
         GPT_SOVITS_S2G_MODEL.resolve()
@@ -294,7 +298,7 @@ def train_sovits(
     )
     config["train"]["if_save_latest"] = True
     config["train"]["if_save_every_weights"] = True
-    config["train"]["save_every_epoch"] = 4
+    config["train"]["save_every_epoch"] = 4 if options.sovits_epochs % 4 == 0 else options.sovits_epochs
     config["train"]["gpu_numbers"] = (
         GPT_SOVITS_GPU
     )
@@ -351,7 +355,10 @@ def train_gpt(
     experiment_directory: Path,
     work_directory: Path,
     log_path: Path,
+    *, options=None,
 ) -> None:
+    from schemas.training import TrainingOptions
+    options=options or TrainingOptions()
     template_path = (
         GPT_SOVITS_ROOT
         / "GPT_SoVITS"
@@ -367,9 +374,9 @@ def train_gpt(
     ) as file:
         config = yaml.safe_load(file)
 
-    config["train"]["batch_size"] = 2
-    config["train"]["epochs"] = 15
-    config["train"]["save_every_n_epoch"] = 5
+    config["train"]["batch_size"] = options.batch_size
+    config["train"]["epochs"] = options.gpt_epochs
+    config["train"]["save_every_n_epoch"] = 5 if options.gpt_epochs % 5 == 0 else options.gpt_epochs
     config["train"]["if_save_every_weights"] = True
     config["train"]["if_save_latest"] = True
     config["train"]["if_dpo"] = False
@@ -563,7 +570,7 @@ def run_training_job(job_id: str, *, runtime=None) -> None:
 
             from schemas.training import TrainingRequest
             request=TrainingRequest.model_validate({key:job_data[key] for key in
-                ('character_id','model_name','engine','stored_filename','transcript_filename','dataset_name') if key in job_data})
+                ('character_id','model_name','engine','stored_filename','transcript_filename','dataset_name','training_options') if key in job_data})
             # Resolve inputs before claiming any outputs; never adopt existing paths.
             if request.dataset_name:
                 prepared=validate_prepared_dataset(DATASETS_DIR,request.dataset_name,request.character_id)
@@ -703,6 +710,7 @@ def run_training_job(job_id: str, *, runtime=None) -> None:
                 experiment_directory,
                 work_directory,
                 log_path,
+                options=request.training_options,
             )
 
             update_job(
@@ -716,6 +724,7 @@ def run_training_job(job_id: str, *, runtime=None) -> None:
                 experiment_directory,
                 work_directory,
                 log_path,
+                options=request.training_options,
             )
 
             update_job(

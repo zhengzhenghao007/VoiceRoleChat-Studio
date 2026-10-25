@@ -34,8 +34,10 @@ class NativeTrainingTests(unittest.TestCase):
         self.assertTrue(self.server.started)
     def stop_server(self):
         self.server.should_exit=True;self.thread.join(5);self.socket.close()
-    def submit(self):
-        response=self.client.post('/api/training/start',json=self.fixture.request.model_dump(exclude_none=True));self.assertEqual(response.status_code,201,response.text)
+    def submit(self,options=None):
+        payload=self.fixture.request.model_dump(exclude_none=True)
+        if options is not None:payload['training_options']=options
+        response=self.client.post('/api/training/start',json=payload);self.assertEqual(response.status_code,201,response.text)
         return response.json()['job_id']
     def wait(self,identity,states,timeout=20):
         deadline=time.monotonic()+timeout
@@ -49,8 +51,12 @@ class NativeTrainingTests(unittest.TestCase):
         child.write_text("from pathlib import Path\nimport time\np=Path("+repr(str(self.heartbeat))+")\nwhile True:\n p.write_text(str(time.time()))\n time.sleep(.04)\n",encoding='utf8')
         path=self.upstream/'GPT_SoVITS/prepare_datasets/1-get-text.py';path.write_text("import subprocess,sys,time\nsubprocess.Popen([sys.executable,"+repr(str(child))+"])\ntime.sleep(60)",encoding='utf8')
     def test_actual_http_fake_pipeline_atomically_commits_private_weights(self):
-        identity=self.submit();job=self.wait(identity,{'completed','failed'})
+        identity=self.submit(options=dict(sovits_epochs=1,gpt_epochs=1,batch_size=1));job=self.wait(identity,{'completed','failed'})
         self.assertEqual(job['status'],'completed',repr(job)+'; '+repr(self.queue.diagnostics()))
+        self.assertEqual(job['training_options'],dict(sovits_epochs=1,gpt_epochs=1,batch_size=1))
+        self.assertEqual(json.loads((self.fixture.jobs/identity/'s2_config.json').read_bytes())['train']['epochs'],1)
+        import yaml
+        self.assertEqual(yaml.safe_load((self.fixture.jobs/identity/'s1_config.yaml').read_text(encoding='utf8'))['train']['batch_size'],1)
         target=self.fixture.models/identity;manifest=json.loads((target/'manifest.json').read_bytes())
         self.assertEqual(manifest['training_task']['job_id'],identity);self.assertTrue(self.queue.store.committed(self.queue.get(identity)))
         self.assertIn('SIMULATED',(target/'gpt_v2pro.ckpt').read_text());self.assertFalse((self.upstream/'GPT_weights_v2Pro').exists());self.assertFalse((self.upstream/'SoVITS_weights_v2Pro').exists());self.assertFalse((self.upstream/'logs').exists())

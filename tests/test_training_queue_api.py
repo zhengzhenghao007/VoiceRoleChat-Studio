@@ -29,7 +29,7 @@ class TrainingQueueAPITests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/training/diagnostics').status_code,200)
         self.assertEqual(self.client.get('/api/training/not-an-id').status_code,404)
     def test_invalid_source_and_legacy_readonly(self):
-        for changes in [dict(engine='cosyvoice'),dict(dataset_name='../escape'),dict(stored_filename='x.wav')]:
+        for changes in [dict(engine='cosyvoice'),dict(dataset_name='../escape'),dict(stored_filename='x.wav'),dict(training_options={'batch_size':'1'})]:
             self.assertEqual(self.client.post('/api/training/start',json=dict(self.payload,**changes)).status_code,422)
         self.assertFalse(list(self.queue.store.directory.glob('*/state.json')))
         identity='e'*32;data=dict(job_id=identity,character_id='actor',engine='cosyvoice',model_name='legacy',stored_filename='x.wav',transcript_filename='x.json',status='queued',progress=0,current_step='old',created_at='2020',updated_at='2020')

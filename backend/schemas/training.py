@@ -5,6 +5,11 @@ from schemas.segmented_dataset import SegmentDatasetRequest
 
 TrainingEngine=Literal['gpt_sovits','cosyvoice']
 TrainingStatus=Literal['queued','preparing','training','completed','failed','cancelled','timed_out','interrupted']
+class TrainingOptions(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    sovits_epochs:int=Field(default=8,ge=1,le=100,strict=True)
+    gpt_epochs:int=Field(default=15,ge=1,le=100,strict=True)
+    batch_size:int=Field(default=2,ge=1,le=8,strict=True)
 class TrainingRequest(BaseModel):
     model_config=ConfigDict(extra='forbid')
     character_id:str=Field(pattern=r'^[A-Za-z0-9_-]{1,100}$')
@@ -13,6 +18,7 @@ class TrainingRequest(BaseModel):
     dataset_name:str|None=None
     engine:Literal['gpt_sovits']='gpt_sovits'
     model_name:str=Field(min_length=1,max_length=100)
+    training_options:TrainingOptions=Field(default_factory=TrainingOptions)
     @model_validator(mode='after')
     def validate_source(self):
         from services.dataset_service import validate_filename
@@ -28,6 +34,7 @@ class TrainingRequest(BaseModel):
                 except Exception as error:raise ValueError('Invalid input filename') from error
         return self
 class TrainingJobResponse(BaseModel):
+    training_options:TrainingOptions|None=None
     schema_version:int=0
     decision:Literal['cancelled','timed_out','interrupted']|None=None
     error_code:str|None=None
