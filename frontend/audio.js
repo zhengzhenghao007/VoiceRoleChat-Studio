@@ -28,6 +28,7 @@ export function createAudioLibrary(callbacks) {
     for(const id of ["audio-upload","refresh-audio","inspect-audio","clip-start","clip-end","create-reference","use-reference"]) $(id).disabled=locked;
     for(const button of $("audio-library-list").querySelectorAll("button")) button.disabled=locked;
     $("inspect-audio").disabled=locked || !selected();
+    $("transcribe-audio").disabled=locked || !selected();
     $("create-reference").disabled=locked || !selected() || (selected().duration_seconds !== null && selected().duration_seconds < 3);
     $("use-reference").disabled=locked || !direct(selected());
     $("record-start").disabled=!supported || locked || state.phase === "importing" || state.disposed;
@@ -206,6 +207,7 @@ export function createAudioLibrary(callbacks) {
   $("audio-upload").addEventListener("change",event=>{const file=event.target.files[0];event.target.value="";if(file)storeFile(file);});
   $("refresh-audio").addEventListener("click",refresh);
   $("inspect-audio").addEventListener("click",inspect);
+  $("transcribe-audio").addEventListener("click",()=>{if(selected() && !callbacks.isBusy() && !active())callbacks.transcribe(selected());});
   $("create-reference").addEventListener("click",clip);
   $("use-reference").addEventListener("click",useReference);
   $("record-start").addEventListener("click",start);

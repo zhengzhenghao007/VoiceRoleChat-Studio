@@ -1,5 +1,6 @@
 "use strict";
 import { createAudioLibrary } from "./audio.js";
+import { createTranscriptionWorkbench } from "./transcriptions.js";
 (() => {
   const $ = (id) => document.getElementById(id);
   const form = $("character-form");
@@ -12,8 +13,8 @@ import { createAudioLibrary } from "./audio.js";
   const state = {roles:[],models:[],original:null,activeId:null,dirty:false,draftEpoch:0,busy:false,busyKind:"",
     loadingRole:false,selectionToken:0,serviceToken:0,rolesToken:0,modelsToken:0,initialized:false,
     service:null,connected:false,rolesError:false,modelsError:false,recording:false};
-  const tabs = ["characters","models","audio"];
-  let audioLibrary = null;
+  const tabs = ["characters","models","audio","transcriptions"];
+  let audioLibrary = null, transcriptionWorkbench = null;
   const canonical = (value) => JSON.stringify(value, (_, item) => item && typeof item === "object" && !Array.isArray(item)
     ? Object.fromEntries(Object.keys(item).sort().map((key) => [key,item[key]])) : item);
   const equal = (first, second) => canonical(first) === canonical(second);
@@ -66,6 +67,7 @@ import { createAudioLibrary } from "./audio.js";
       $(current + "-panel").hidden = !selected;
     }
     if (name === "audio") audioLibrary?.refresh();
+    transcriptionWorkbench?.setVisible(name === "transcriptions");
   }
   function chooseValue(select, value) {
     if (![...select.options].some((option) => option.value === value)) select.add(new Option(value, value));
@@ -298,6 +300,7 @@ import { createAudioLibrary } from "./audio.js";
       !canGenerate ? "启动 CPU 服务后，即可生成试听。" : "使用这个角色已保存的声音配置。";
     for (const name of tabs) $("tab-"+name).disabled = state.recording && name !== "audio";
     audioLibrary?.renderControls();
+    transcriptionWorkbench?.renderControls();
   }
   async function busy(kind, task, onError) {
     if (state.busy || state.recording) return;
@@ -399,9 +402,11 @@ import { createAudioLibrary } from "./audio.js";
     });
   }
   window.addEventListener("beforeunload",(event) => {
-    if (state.dirty || audioLibrary?.hasPendingRecording()) { event.preventDefault(); event.returnValue = ""; }
+    if (state.dirty || audioLibrary?.hasPendingRecording() || transcriptionWorkbench?.hasDraft()) { event.preventDefault(); event.returnValue = ""; }
   });
+  transcriptionWorkbench=createTranscriptionWorkbench({api,jsonRequest,busy,notice,isBusy:()=>state.busy || state.loadingRole || state.recording});
   audioLibrary=createAudioLibrary({api,jsonRequest,busy,notice,isBusy:()=>state.busy || state.loadingRole,
+    transcribe:(asset)=>{transcriptionWorkbench.setSource(asset);tab("transcriptions");},
     onRecordingChange:(active)=>{state.recording=active;renderControls();},
     useReference:(path)=>{
       if (state.busy || state.loadingRole || state.recording || !/^uploads\/[0-9a-f]{32}\.wav$/.test(path)) return;

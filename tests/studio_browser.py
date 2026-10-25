@@ -22,6 +22,11 @@ from app import app
 from api.characters import get_character_service
 from api.models import get_model_service
 from api.tts import get_tts_service, get_synthesis_service
+from api.transcriptions import get_jobs,get_reviews
+from services.transcription_job_service import TranscriptionJobs
+from services.transcript_review_service import TranscriptReviews
+from test_transcription_jobs import Worker
+from studio_transcriptions import transcription_flow
 from schemas.character import CharacterPatch
 from services.character_service import CharacterService
 from services.tts_service import ProbeResult
@@ -53,6 +58,10 @@ def main():
     app.dependency_overrides[get_model_service] = lambda: fixture.models
     app.dependency_overrides[get_synthesis_service] = lambda: fixture.service
     app.dependency_overrides[get_tts_service] = lambda: manager
+    transcript_jobs=TranscriptionJobs(fixture.root/'transcripts',fixture.root/'uploads',worker_factory=lambda:Worker(),autostart=False)
+    transcript_reviews=TranscriptReviews(fixture.root/'transcripts',fixture.root/'uploads')
+    app.dependency_overrides[get_jobs]=lambda:transcript_jobs
+    app.dependency_overrides[get_reviews]=lambda:transcript_reviews
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(128)
@@ -80,6 +89,7 @@ def main():
                     page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
                     page.goto(address + "/studio/")
                     page.wait_for_load_state("networkidle")
+                    expect(page.get_by_role('tab',name='转写',exact=True)).to_be_visible()
                     expect(page.get_by_role("heading", name="角色与声音", exact=True)).to_be_visible()
                     expect(page.get_by_text("还没有角色", exact=True)).to_be_visible()
                     page.get_by_label("角色名称", exact=True).fill("星野 / 测试角色")
@@ -258,6 +268,7 @@ def main():
                     page.once("dialog",lambda dialog:dialog.accept())
                     page.get_by_role("button",name="新建角色",exact=True).click()
                     page.get_by_role("tab",name="音频",exact=True).click()
+                    transcription_flow(page,transcript_jobs,transcript_reviews,fixture.root,args.screenshots_dir)
                     page.evaluate("() => {window.__realMic=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);navigator.mediaDevices.getUserMedia=()=>Promise.reject(new DOMException('denied','NotAllowedError'));}")
                     page.get_by_role("button",name="开始录音",exact=True).click()
                     expect(page.locator("#notice")).to_contain_text("麦克风权限被拒绝")
@@ -318,7 +329,10 @@ def main():
                         "incomplete model", "invalid WAV/422 draft", "unmanaged service", "busy controls", "keyboard tabs",
                         "audio upload/library/playback/clip to draft", "microphone denied", "fake recording preview/import/track cleanup",
                         "180-second virtual auto-stop", "failed import retains preview", "cancel pending permission", "page-exit track cleanup",
-                        "audio mobile", "no unexpected console/page errors"],
+                        "audio mobile", "transcription submit/status/cancel/result", "immutable raw/correction copy",
+                        "review conflict/reload", "review pending-save draft", "review dirty switch/tab retention",
+                        "segment add/reorder/delete/validation", "record request identity", "record failed-load retry", "orphan audio/text",
+                        "transcript safe DOM/mobile", "visible-only job polling", "no unexpected console/page errors"],
                         "screenshots": str(args.screenshots_dir)}, ensure_ascii=False), flush=True)
                 except Exception:
                     try:
@@ -333,6 +347,7 @@ def main():
         if thread.is_alive(): thread.join(10)
         listener.close()
         app.dependency_overrides.clear()
+        transcript_jobs.close()
         fixture.doCleanups()
 
 
