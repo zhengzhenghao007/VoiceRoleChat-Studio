@@ -7,7 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent
 BACKEND = ROOT / "backend"
-DEPENDENCIES = ("fastapi", "pydantic", "uvicorn", "multipart", "faster_whisper")
+DEPENDENCIES = ("fastapi", "pydantic", "uvicorn", "multipart", "faster_whisper", "httpx")
 
 
 def load_config():

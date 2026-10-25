@@ -53,6 +53,8 @@ class StartupTests(unittest.TestCase):
         self.assertFalse(report["ok"])
         self.assertTrue(any(c["status"] == "error" and "fastapi" in c["message"]
                             for c in report["checks"]))
+        self.assertTrue(any(c["status"] == "error" and "httpx" in c["message"]
+                            for c in report["checks"]))
 
     def test_diagnostics_do_not_import_heavy_modules(self):
         code = ("import sys,json;sys.path.insert(0," + repr(str(ROOT)) + ");"
