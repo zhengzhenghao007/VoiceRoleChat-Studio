@@ -539,6 +539,21 @@ def export_models(
     return model_directory
 
 
+def failure_code(error) -> str:
+    from services.training_command import CommandError
+    allowed={'timed_out','exit_nonzero','cancelled','ownership_failed','cleanup_failed','closed'}
+    return 'command_'+error.code if isinstance(error,CommandError) and error.code in allowed else 'pipeline_failed'
+
+
+def record_failure(log_path: Path, code: str) -> None:
+    # Only append to the log this invocation created. Never create/adopt one.
+    try:
+        with os.fdopen(os.open(log_path,os.O_WRONLY|os.O_APPEND),'w',encoding='utf8') as log:
+            log.write('FAILURE: '+code+'\n')
+    except OSError:
+        pass
+
+
 def run_training_job(job_id: str, *, runtime=None) -> None:
     get_job=runtime.load if runtime else get_training_job
     update_job=runtime.update if runtime else update_training_job
@@ -547,6 +562,7 @@ def run_training_job(job_id: str, *, runtime=None) -> None:
         / f"{job_id}.log"
     )
 
+    log_owned=False
     try:
         with _training_lock:
             job_data = get_job(job_id)
@@ -555,6 +571,7 @@ def run_training_job(job_id: str, *, runtime=None) -> None:
             log_path=safe(TRAINING_JOBS_DIR/(job_id+'.log'))
             with log_path.open('x',encoding='utf8'):
                 pass
+            log_owned=True
 
             experiment_name = safe_experiment_name(
                 job_data["model_name"],
@@ -767,12 +784,15 @@ def run_training_job(job_id: str, *, runtime=None) -> None:
             )
 
     except Exception as error:
+        code=failure_code(error)
+        if log_owned:record_failure(log_path,code)
         try:
             update_job(
                 job_id,
                 job_status="failed",
                 current_step="Training failed",
-                error=str(error),
+                error=code,
+                **({'error_code':code} if runtime else {}),
             )
         except Exception:
             pass

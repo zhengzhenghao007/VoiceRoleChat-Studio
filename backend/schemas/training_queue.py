@@ -56,7 +56,7 @@ class Progress(Identity):
     status:Literal['preparing','training','failed']
     progress:int=Field(ge=0,le=99)
     current_step:str=Field(max_length=200)
-    error_code:Literal['pipeline_failed','input_changed']|None=None
+    error_code:Literal['pipeline_failed','input_changed','command_timed_out','command_exit_nonzero','command_cancelled','command_ownership_failed','command_cleanup_failed','command_closed']|None=None
 class Candidate(Identity):
     manifest_sha256:str=Field(pattern=SHA)
     gpt_sha256:str=Field(pattern=SHA)

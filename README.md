@@ -249,6 +249,9 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/tts/service/stop
 已经提交模型的完成任务仍返回 `completed`，不会删除产物。旧平铺任务只读，取消返回 409。
 
 状态包含 `queued/preparing/training/completed/failed/cancelled/timed_out/interrupted`。
+失败诊断保留阶段及受限的 `command_*` 错误码：命令超时、非零退出、取消、进程归属、清理或关闭失败。
+命令超时记为 `failed/command_timed_out`，整项任务期限才记为 `timed_out`；未知异常为 `pipeline_failed`。
+诊断不回传原始异常内容。详情见 [C2C-012B 验证记录](docs/C2C-012B-results.md)。
 `progress` 是已执行阶段的里程碑，不代表精确训练百分比；正式模型提交前不会达到 100。
 `TRAINING_COMMAND_TIMEOUT` 默认 21600 秒、最大 86400 秒；`TRAINING_TASK_TIMEOUT` 默认 86400 秒、
 最大 604800 秒，排队时间不计入任务期限。外层 Windows Job Object 同时约束准备阶段、嵌套命令及后代。
@@ -357,7 +360,7 @@ models/<job_id>/manifest.json      # 导出记录与对应权重
 部分测试只读访问当前本地角色和模型记录，因此本地损坏的配置文件可能影响测试结果。
 
 开发依赖声明固定了 `httpx==0.28.1`；这不是完整的运行时或传递依赖锁文件，也不是全新环境安装验收。
-最近验证：两套现有 Python 环境均运行 **233 项测试：232 项通过、1 项跳过**，包括真实 HTTP、音频、转写、后台任务、Windows 进程回收、校对存储与 API。最近一次 Chromium 工作台 **41 项流程检查**通过，使用隔离数据与模拟推理/转写任务。
+最近验证：Python 3.12 环境运行 **240 项测试：239 项通过、1 项跳过**，包括真实 HTTP、音频、转写、后台任务、Windows 进程回收、校对存储与 API。双环境结果见各任务验收记录。最近一次 Chromium 工作台 **41 项流程检查**通过，使用隔离数据与模拟推理/转写任务。
 跳过项是需要额外 Windows 权限的真实符号链接测试；另有模拟路径解析逃逸测试通过。
 浏览器验收使用已有 Python Playwright 与 Chromium（不是运行工作台的依赖），不自动安装或下载：
 

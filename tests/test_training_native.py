@@ -65,6 +65,20 @@ class NativeTrainingTests(unittest.TestCase):
         models=ModelService(self.fixture.root,self.upstream/'GPT_weights_v2Pro',self.upstream/'SoVITS_weights_v2Pro').list_models()
         self.assertEqual(len(models),1,'Committed fake model must be discoverable; private weights must stay invisible')
         self.assertEqual(models[0].status,'ready')
+    def test_failed_command_preserves_bounded_code_and_stage(self):
+        (self.upstream/'GPT_SoVITS/s2_train.py').write_text("raise SystemExit(7)",encoding='utf8')
+        identity=self.submit();result=self.wait(identity,{'failed'})
+        self.assertEqual(result['status'],'failed');self.assertEqual(result['error_code'],'command_exit_nonzero')
+        self.assertIn('SoVITS',result['current_step']);self.assertIsNone(self.queue._worker)
+        log=(self.fixture.jobs/(identity+'.log')).read_text(encoding='utf8')
+        self.assertIn('FAILURE: command_exit_nonzero',log)
+    def test_command_deadline_is_distinct_from_whole_task_deadline(self):
+        self.queue.store.runtime=self.queue.store.runtime.model_copy(update={'TRAINING_COMMAND_TIMEOUT':'1'})
+        path=self.upstream/'GPT_SoVITS/prepare_datasets/1-get-text.py'
+        path.write_text('import time\ntime.sleep(30)',encoding='utf8')
+        identity=self.submit();result=self.wait(identity,{'failed'})
+        self.assertEqual(result['status'],'failed');self.assertEqual(result['error_code'],'command_timed_out')
+        self.assertIn('text',result['current_step']);self.assertIsNone(self.queue._worker)
     def test_running_cancel_stops_outer_nested_and_descendant(self):
         self.heartbeat_pipeline();identity=self.submit();deadline=time.monotonic()+20
         while not self.heartbeat.exists() and time.monotonic()<deadline:

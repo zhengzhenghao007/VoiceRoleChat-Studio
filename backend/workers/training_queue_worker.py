@@ -49,12 +49,22 @@ class PipelineRuntime:
         if identity!=self.request.job_id:raise ValueError('Task identity mismatch')
         self.sequence+=1
         status=values.get('job_status',self.job['status']);self.job['status']=status
+        phase=values.get('current_step','Training pipeline')
+        if status=='failed':
+            phases={'Preparing dataset','Extracting text and BERT features','Extracting HuBERT features','Extracting speaker features','Extracting semantic tokens','Training SoVITS v2Pro','Training GPT v2Pro','Exporting trained models'}
+            previous=self.job.get('current_step')
+            phase='Failed: '+previous if previous in phases else 'Training failed'
+        self.job['current_step']=phase
+        progress_value=values.get('progress',self.job.get('progress',0));self.job['progress']=progress_value
         base=dict(job_id=identity,run_nonce=self.request.run_nonce,request_sha256=self.request_sha)
         if status=='completed':
             stage=safe(self.folder/'export'/identity)
             candidate=Candidate(**base,manifest_sha256=digest(stage/'manifest.json',1024*1024),gpt_sha256=digest(stage/'gpt_v2pro.ckpt',8*1024**3),sovits_sha256=digest(stage/'sovits_v2pro.pth',8*1024**3))
             atomic_json(self.folder/'candidate.json',candidate.model_dump(),8192);self.completed=True
-        progress=Progress(**base,sequence=self.sequence,status='failed' if status=='failed' else ('training' if status in ('training','completed') else 'preparing'),progress=min(99,values.get('progress',0)),current_step=values.get('current_step','Training pipeline'),error_code='pipeline_failed' if status=='failed' else None)
+        error_code=values.get('error_code','pipeline_failed') if status=='failed' else None
+        allowed={'command_timed_out','command_exit_nonzero','command_cancelled','command_ownership_failed','command_cleanup_failed','command_closed','pipeline_failed'}
+        if status=='failed' and error_code not in allowed:error_code='pipeline_failed'
+        progress=Progress(**base,sequence=self.sequence,status='failed' if status=='failed' else ('training' if status in ('training','completed') else 'preparing'),progress=min(99,progress_value),current_step=phase,error_code=error_code)
         publish_progress(self.folder/'progress.json',progress.model_dump())
         return dict(self.job)
 
