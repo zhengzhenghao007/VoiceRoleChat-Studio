@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -8,11 +9,14 @@ from fastapi import HTTPException, status
 
 from config import (
     CHARACTERS_DIR,
+    DATASETS_DIR,
     TRAINING_JOBS_DIR,
     TRANSCRIPTS_DIR,
     UPLOAD_DIR,
 )
 from schemas.training import TrainingRequest
+from services.training_dataset import component,validate_prepared_dataset
+from services.transcription_job_service import safe,JobError
 
 
 _job_file_lock = Lock()
@@ -47,16 +51,25 @@ def validate_job_id(job_id: str) -> str:
 
 
 def get_job_path(job_id: str) -> Path:
-    safe_job_id = validate_job_id(job_id)
-    return TRAINING_JOBS_DIR / f"{safe_job_id}.json"
+    if not re.fullmatch(r"[0-9a-f]{32}",job_id):
+        raise HTTPException(status_code=400,detail="Invalid training job ID.")
+    return safe(TRAINING_JOBS_DIR / f"{job_id}.json")
 
 
 def validate_training_inputs(request: TrainingRequest) -> None:
-    character_config = (
-        CHARACTERS_DIR
-        / request.character_id
-        / "config.json"
-    )
+    try:_validate_training_inputs(request)
+    except HTTPException:raise
+    except (OSError,ValueError,JobError) as error:
+        raise HTTPException(status_code=422,detail="Unsafe or unavailable training input.") from error
+
+
+def _validate_training_inputs(request: TrainingRequest) -> None:
+    character_config = safe(component(CHARACTERS_DIR,request.character_id)/'config.json')
+    if request.dataset_name is not None:
+        try:validate_prepared_dataset(DATASETS_DIR,request.dataset_name,request.character_id)
+        except Exception as error:raise HTTPException(status_code=422,detail='Prepared dataset failed integrity validation.') from error
+        if not character_config.is_file():raise HTTPException(status_code=404,detail='Character not found.')
+        return
 
     if not character_config.exists():
         raise HTTPException(
@@ -72,8 +85,8 @@ def validate_training_inputs(request: TrainingRequest) -> None:
         request.transcript_filename
     )
 
-    audio_path = UPLOAD_DIR / stored_filename
-    transcript_path = TRANSCRIPTS_DIR / transcript_filename
+    audio_path = safe(UPLOAD_DIR / stored_filename)
+    transcript_path = safe(TRANSCRIPTS_DIR / transcript_filename)
 
     if not audio_path.exists() or not audio_path.is_file():
         raise HTTPException(
@@ -127,6 +140,7 @@ def create_training_job(request: TrainingRequest) -> dict:
         "model_name": request.model_name.strip(),
         "stored_filename": request.stored_filename,
         "transcript_filename": request.transcript_filename,
+        "dataset_name": request.dataset_name,
         "status": "queued",
         "progress": 0,
         "current_step": "Waiting to start",

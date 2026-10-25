@@ -48,8 +48,8 @@ def annotation_value(value, name):
         raise HTTPException(status_code=400,detail=name+' must not contain delimiters or control characters.')
     return value.strip()
 
-def remove_created_dataset(path):
-    target=safe_path(path);root=safe_path(DATASETS_DIR)
+def remove_created_dataset(path,root=None):
+    target=safe_path(path);root=safe_path(DATASETS_DIR if root is None else root)
     if target.parent!=root or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',target.name):
         raise HTTPException(status_code=500,detail='Refused unsafe dataset cleanup.')
     shutil.rmtree(target,ignore_errors=True)
@@ -68,7 +68,9 @@ def load_json_file(file_path: Path, error_message: str) -> dict:
 
 def build_gpt_sovits_dataset(
     request: DatasetBuildRequest,
+    *, roots=None, cleanup_on_failure=True,
 ) -> dict:
+    characters_root,datasets_root,transcripts_root,uploads_root = roots or (CHARACTERS_DIR,DATASETS_DIR,TRANSCRIPTS_DIR,UPLOAD_DIR)
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',request.character_id):
         raise HTTPException(status_code=400,detail='Invalid character ID.')
     stored_filename = validate_filename(
@@ -79,13 +81,13 @@ def build_gpt_sovits_dataset(
     )
 
     character_config_path = (
-        CHARACTERS_DIR
+        characters_root
         / request.character_id
         / "config.json"
     )
-    audio_path = UPLOAD_DIR / stored_filename
+    audio_path = uploads_root / stored_filename
     transcript_path = (
-        TRANSCRIPTS_DIR
+        transcripts_root
         / transcript_filename
     )
     character_config_path=safe_path(character_config_path)
@@ -144,7 +146,7 @@ def build_gpt_sovits_dataset(
     ),'Speaker name')
 
     dataset_directory = (
-        DATASETS_DIR
+        datasets_root
         / request.dataset_name
     )
     dataset_directory=safe_path(dataset_directory)
@@ -157,10 +159,9 @@ def build_gpt_sovits_dataset(
             detail="A dataset with this name already exists.",
         )
 
-    audio_directory.mkdir(
-        parents=True,
-        exist_ok=False,
-    )
+    dataset_directory.parent.mkdir(parents=True,exist_ok=True)
+    dataset_directory.mkdir(exist_ok=False)
+    audio_directory.mkdir(exist_ok=False)
 
     copied_audio_path = (
         audio_directory
@@ -173,7 +174,7 @@ def build_gpt_sovits_dataset(
             copied_audio_path,
         )
     except OSError as error:
-        remove_created_dataset(dataset_directory)
+        if cleanup_on_failure:remove_created_dataset(dataset_directory,datasets_root)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -236,7 +237,7 @@ def build_gpt_sovits_dataset(
             encoding="utf-8",
         )
     except OSError as error:
-        remove_created_dataset(dataset_directory)
+        if cleanup_on_failure:remove_created_dataset(dataset_directory,datasets_root)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

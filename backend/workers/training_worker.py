@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 from threading import Lock
+from services.training_dataset import component,exclusive_directory,validate_prepared_dataset
+from services.transcription_job_service import safe
 
 from config import (
     CHARACTERS_DIR,
@@ -226,146 +228,14 @@ def prepare_dataset(
     job_data: dict,
     experiment_name: str,
 ) -> tuple[Path, Path, Path, dict]:
-    stored_filename = Path(
-        job_data["stored_filename"]
-    ).name
-
-    transcript_filename = Path(
-        job_data["transcript_filename"]
-    ).name
-
-    source_audio = (
-        UPLOAD_DIR
-        / stored_filename
-    )
-
-    transcript_path = (
-        TRANSCRIPTS_DIR
-        / transcript_filename
-    )
-
-    character_path = (
-        CHARACTERS_DIR
-        / job_data["character_id"]
-        / "config.json"
-    )
-
-    if not source_audio.is_file():
-        raise FileNotFoundError(
-            f"Audio file not found: {source_audio}"
-        )
-
-    if not transcript_path.is_file():
-        raise FileNotFoundError(
-            f"Transcript file not found: "
-            f"{transcript_path}"
-        )
-
-    if not character_path.is_file():
-        raise FileNotFoundError(
-            f"Character file not found: "
-            f"{character_path}"
-        )
-
-    transcript_data = load_json(
-        transcript_path
-    )
-    character_data = load_json(
-        character_path
-    )
-
-    language = str(
-        transcript_data.get("language", "")
-    ).strip()
-
-    text = str(
-        transcript_data.get("text", "")
-    ).strip()
-
-    if language not in SUPPORTED_LANGUAGES:
-        raise ValueError(
-            f"Unsupported language: {language}"
-        )
-
-    if not text:
-        raise ValueError(
-            "Transcript text is empty."
-        )
-
-    speaker_name = str(
-        character_data.get(
-            "name",
-            job_data["character_id"],
-        )
-    ).strip()
-
-    dataset_directory = (
-        DATASETS_DIR
-        / experiment_name
-    )
-
-    if dataset_directory.exists():
-        shutil.rmtree(dataset_directory)
-
-    audio_directory = (
-        dataset_directory
-        / "audio"
-    )
-
-    audio_directory.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    copied_audio = (
-        audio_directory
-        / source_audio.name
-    )
-
-    shutil.copy2(
-        source_audio,
-        copied_audio,
-    )
-
-    annotation_path = (
-        dataset_directory
-        / "transcript.list"
-    )
-
-    annotation_line = (
-        f"{copied_audio.resolve()}"
-        f"|{speaker_name}"
-        f"|{language}"
-        f"|{text}"
-    )
-
-    annotation_path.write_text(
-        annotation_line + "\n",
-        encoding="utf-8",
-    )
-
-    metadata = {
-        "experiment_name": experiment_name,
-        "character_id": job_data["character_id"],
-        "speaker_name": speaker_name,
-        "language": language,
-        "text": text,
-        "source_audio": str(source_audio),
-        "copied_audio": str(copied_audio),
-        "transcript": str(transcript_path),
-    }
-
-    write_json(
-        dataset_directory / "dataset.json",
-        metadata,
-    )
-
-    return (
-        dataset_directory,
-        audio_directory,
-        annotation_path,
-        metadata,
-    )
+    from services.dataset_service import build_gpt_sovits_dataset
+    from schemas.dataset import DatasetBuildRequest
+    metadata=build_gpt_sovits_dataset(DatasetBuildRequest(
+        character_id=job_data['character_id'],stored_filename=job_data['stored_filename'],
+        transcript_filename=job_data['transcript_filename'],dataset_name=experiment_name),
+        roots=(CHARACTERS_DIR,DATASETS_DIR,TRANSCRIPTS_DIR,UPLOAD_DIR),cleanup_on_failure=False)
+    directory=component(DATASETS_DIR,experiment_name)
+    return directory,safe(directory/'audio'),safe(directory/'transcript.list'),metadata
 
 
 def build_preprocessing_environment(
@@ -631,6 +501,7 @@ def export_models(
     job_id: str,
     experiment_name: str,
     metadata: dict,
+    *, reserved=False,
 ) -> Path:
     sovits_source = newest_matching_file(
         GPT_SOVITS_ROOT
@@ -649,10 +520,11 @@ def export_models(
         / job_id
     )
 
-    model_directory.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    if not reserved:
+        model_directory=exclusive_directory(MODELS_DIR,job_id)
+    else:
+        model_directory=component(MODELS_DIR,job_id)
+        if any(model_directory.iterdir()):raise FileExistsError("Model output already populated")
 
     sovits_target = (
         model_directory
@@ -703,6 +575,11 @@ def run_training_job(job_id: str) -> None:
     try:
         with _training_lock:
             job_data = get_training_job(job_id)
+            if job_data.get('status','queued')!='queued':
+                return
+            log_path=safe(TRAINING_JOBS_DIR/(job_id+'.log'))
+            with log_path.open('x',encoding='utf8'):
+                pass
 
             experiment_name = safe_experiment_name(
                 job_data["model_name"],
@@ -716,41 +593,25 @@ def run_training_job(job_id: str) -> None:
                 current_step="Preparing dataset",
             )
 
-            (
-                dataset_directory,
-                audio_directory,
-                annotation_path,
-                metadata,
-            ) = prepare_dataset(
-                job_data,
-                experiment_name,
-            )
-
-            experiment_directory = (
-                GPT_SOVITS_ROOT
-                / "logs"
-                / experiment_name
-            )
-
-            if experiment_directory.exists():
-                shutil.rmtree(
-                    experiment_directory
-                )
-
-            experiment_directory.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
-
-            work_directory = (
-                TRAINING_JOBS_DIR
-                / job_id
-            )
-
-            work_directory.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
+            from schemas.training import TrainingRequest
+            request=TrainingRequest.model_validate({key:job_data[key] for key in
+                ('character_id','model_name','engine','stored_filename','transcript_filename','dataset_name') if key in job_data})
+            # Resolve inputs before claiming any outputs; never adopt existing paths.
+            if request.dataset_name:
+                prepared=validate_prepared_dataset(DATASETS_DIR,request.dataset_name,request.character_id)
+            else:
+                prepared=None
+            for root,pattern in ((GPT_SOVITS_ROOT/'GPT_weights_v2Pro',experiment_name+'-*'),
+                                 (GPT_SOVITS_ROOT/'SoVITS_weights_v2Pro',experiment_name+'_*')):
+                safe(root)
+                if list(root.glob(pattern)):raise FileExistsError('Existing experiment weights preserved')
+            experiment_directory=exclusive_directory(GPT_SOVITS_ROOT/'logs',experiment_name)
+            work_directory=exclusive_directory(TRAINING_JOBS_DIR,job_id)
+            exclusive_directory(MODELS_DIR,job_id)
+            if prepared:
+                dataset_directory,audio_directory,annotation_path,metadata=prepared
+            else:
+                dataset_directory,audio_directory,annotation_path,metadata=prepare_dataset(job_data,experiment_name)
 
             environment = (
                 build_preprocessing_environment(
@@ -909,6 +770,7 @@ def run_training_job(job_id: str) -> None:
                         log_path
                     ),
                 },
+                reserved=True,
             )
 
             update_training_job(
