@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from threading import Lock
 from services.training_dataset import component,exclusive_directory,validate_prepared_dataset
+from services.training_snapshot import create_verified_training_snapshot
 from services.transcription_job_service import safe
 
 from config import (
@@ -609,7 +610,8 @@ def run_training_job(job_id: str) -> None:
             work_directory=exclusive_directory(TRAINING_JOBS_DIR,job_id)
             exclusive_directory(MODELS_DIR,job_id)
             if prepared:
-                dataset_directory,audio_directory,annotation_path,metadata=prepared
+                dataset_directory,audio_directory,annotation_path,metadata=create_verified_training_snapshot(
+                    DATASETS_DIR,request.dataset_name,request.character_id,TRAINING_JOBS_DIR,job_id)
             else:
                 dataset_directory,audio_directory,annotation_path,metadata=prepare_dataset(job_data,experiment_name)
 

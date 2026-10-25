@@ -39,5 +39,6 @@ def validate_prepared_dataset(root,name,character_id):
         total+=clip.frames
     if abs(total/32000-manifest.total_duration)>1e-9:raise ValueError('Dataset total duration mismatch')
     annotation=safe(folder/'transcript.list')
-    if annotation.stat().st_size>8*1024*1024 or annotation.read_text(encoding='utf8')!='\n'.join(rows)+'\n':raise ValueError('Annotation mismatch')
+    with annotation.open('rb') as reader:content=reader.read(8*1024*1024+1)
+    if len(content)>8*1024*1024 or content.decode('utf8')!='\n'.join(rows)+'\n':raise ValueError('Annotation mismatch')
     return folder,safe(folder/'audio'),annotation,manifest.model_dump()

@@ -84,11 +84,18 @@ class TrainingSafetyTests(unittest.TestCase):
         output=self.datasets/worker.safe_experiment_name('test',self.job['job_id'])
         self.assertTrue((output/'audio'/self.fixture.source.name).is_file())
         self.assertEqual((self.prepared/'dataset.json').read_bytes(),before)
-    def test_worker_prepared_uses_original_inputs_without_legacy_build(self):
+    def test_worker_prepared_uses_task_snapshot_without_legacy_build(self):
         self.job.update(dataset_name='prepared',stored_filename=None,transcript_filename=None)
         with patch.object(worker,'get_training_job',return_value=self.job),patch.object(worker,'update_training_job'),patch.object(worker,'prepare_dataset') as legacy,patch.object(worker,'build_preprocessing_environment',return_value={}) as environment,patch.object(worker,'run_command',side_effect=RuntimeError('test stops before subprocess')):
             worker.run_training_job(self.job['job_id'])
-        legacy.assert_not_called();self.assertEqual(environment.call_args.args[:2],(self.prepared/'transcript.list',self.prepared/'audio'))
+        legacy.assert_not_called();snapshot=self.jobs/self.job['job_id']/'inputs/prepared'
+        self.assertEqual(environment.call_args.args[:2],(snapshot/'transcript.list',snapshot/'audio'))
+        self.assertTrue((self.jobs/self.job['job_id']/'input-provenance.json').is_file())
+    def test_worker_snapshot_failure_never_runs_commands(self):
+        self.job.update(dataset_name='prepared',stored_filename=None,transcript_filename=None)
+        with patch.object(worker,'get_training_job',return_value=self.job),patch.object(worker,'update_training_job'),patch.object(worker,'create_verified_training_snapshot',side_effect=OSError('copy failed')),patch.object(worker,'run_command') as command:
+            worker.run_training_job(self.job['job_id'])
+        self.assertFalse(command.called,'No command after snapshot failure')
 
     def test_legacy_new_output_and_path_rejection(self):
         directory,_,annotation,metadata=worker.prepare_dataset(self.job,'fresh')
