@@ -157,3 +157,14 @@ class SessionService:
                         messages.append(MessageRecord(id=row[key],request_id=row['request_id'],role=role,content=row[text],created_at=row['created_at'],model=row['model'] if role=='assistant' else None))
             except (ValueError,TypeError,ValidationError):raise SessionError('invalid_record',409) from None
             return messages
+
+    def lookup_turn(self,identity,request_id):
+        self._identity(identity);self._identity(request_id)
+        with self._connection() as connection:
+            self._read(connection,identity)
+            row=connection.execute('SELECT * FROM turns WHERE session_id=? AND request_id=?',(identity,request_id)).fetchone()
+            if row is None:return None
+            try:
+                TurnInput(request_id=row['request_id'],expected_revision=max(1,row['revision']-1),user_text=row['user_text'],assistant_text=row['assistant_text'],model=row['model'])
+                return self._receipt(row),row['user_text']
+            except (ValueError,TypeError,ValidationError):raise SessionError('invalid_record',409) from None

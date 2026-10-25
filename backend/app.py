@@ -10,6 +10,7 @@ from api.datasets import router as datasets_router
 from api.models import router as models_router
 from api.llm import router as llm_router
 from api.sessions import router as sessions_router
+from api.replies import router as replies_router,close_reply_manager
 from api.training import router as training_router, start_training_queue, close_training_queue
 from api.transcriptions import router as transcriptions_router, close_jobs
 from api.voices import router as voices_router
@@ -30,18 +31,21 @@ async def lifespan(app):
         yield
     finally:
         try:
-            await run_in_threadpool(close_training_queue)
+            await close_reply_manager()
         finally:
             try:
-                await run_in_threadpool(close_training_commands)
+                await run_in_threadpool(close_training_queue)
             finally:
                 try:
-                    await run_in_threadpool(close_jobs)
+                    await run_in_threadpool(close_training_commands)
                 finally:
                     try:
-                        await run_in_threadpool(cleanup_retained)
+                        await run_in_threadpool(close_jobs)
                     finally:
-                        await run_in_threadpool(close_tts_service)
+                        try:
+                            await run_in_threadpool(cleanup_retained)
+                        finally:
+                            await run_in_threadpool(close_tts_service)
 
 
 app = FastAPI(
@@ -69,6 +73,7 @@ app.include_router(models_router)
 app.include_router(tts_router)
 app.include_router(llm_router)
 app.include_router(sessions_router)
+app.include_router(replies_router)
 app.mount("/studio", StaticFiles(directory=PROJECT_ROOT / "frontend", html=True), name="studio")
 
 
