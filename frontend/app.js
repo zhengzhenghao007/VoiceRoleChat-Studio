@@ -404,7 +404,7 @@ import { createTranscriptionWorkbench } from "./transcriptions.js";
   window.addEventListener("beforeunload",(event) => {
     if (state.dirty || audioLibrary?.hasPendingRecording() || transcriptionWorkbench?.hasDraft()) { event.preventDefault(); event.returnValue = ""; }
   });
-  transcriptionWorkbench=createTranscriptionWorkbench({api,jsonRequest,busy,notice,isBusy:()=>state.busy || state.loadingRole || state.recording});
+  transcriptionWorkbench=createTranscriptionWorkbench({api,jsonRequest,busy,notice,isBusy:()=>state.busy || state.loadingRole || state.recording,characters:()=>state.roles});
   audioLibrary=createAudioLibrary({api,jsonRequest,busy,notice,isBusy:()=>state.busy || state.loadingRole,
     transcribe:(asset)=>{transcriptionWorkbench.setSource(asset);tab("transcriptions");},
     onRecordingChange:(active)=>{state.recording=active;renderControls();},

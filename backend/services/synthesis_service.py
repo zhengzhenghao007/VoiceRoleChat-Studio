@@ -46,10 +46,12 @@ def request_upstream(port, method, path, deadline, *, payload=None, limit=65536)
         raise ServiceTimeout("Synthesis deadline exceeded")
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=remaining)
     timer = None
+    watchdog_fired = threading.Event()
     try:
         connection.connect()
         sock = connection.sock
         def expire():
+            watchdog_fired.set()
             try: sock.shutdown(socket.SHUT_RDWR)
             except OSError: pass
         timer = threading.Timer(max(.001, deadline - time.monotonic()), expire)
@@ -68,7 +70,7 @@ def request_upstream(port, method, path, deadline, *, payload=None, limit=65536)
             raise SynthesisError("Upstream response exceeds allowed size")
         return data
     except (OSError, http.client.HTTPException) as error:
-        if isinstance(error, TimeoutError) or time.monotonic() >= deadline:
+        if watchdog_fired.is_set() or isinstance(error, TimeoutError) or time.monotonic() >= deadline:
             raise ServiceTimeout("Synthesis deadline exceeded") from error
         raise ServiceUnavailable("Inference transport failed; owned service requires restart") from error
     finally:

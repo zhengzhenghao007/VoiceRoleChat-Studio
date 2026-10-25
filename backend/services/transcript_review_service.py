@@ -1,5 +1,6 @@
 """Read-only transcript discovery and atomic, hash-protected review copies."""
 from datetime import datetime,timezone
+from contextlib import contextmanager
 import hashlib,json,os,re,tempfile
 from pathlib import Path
 from threading import RLock
@@ -59,6 +60,12 @@ class TranscriptReviews:
         except (ValueError,ValidationError,OSError,RecursionError) as error:raise ReviewError('Malformed transcript data') from error
     def get(self,identity):
         with _record_lock:return self._document(identity,self._bytes(self._path(identity)))
+    @contextmanager
+    def locked_snapshot(self,identity):
+        """Bind a consumer's final publication to one review revision/hash."""
+        with _record_lock:
+            raw=self._bytes(self._path(identity))
+            yield self._document(identity,raw),raw
     def list(self):
         items=[];diagnostics=[]
         if not self.root.exists():return dict(items=items,diagnostics=diagnostics)

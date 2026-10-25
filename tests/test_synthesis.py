@@ -80,6 +80,23 @@ class Upstream:
 
 
 class SynthesisTests(unittest.TestCase):
+    def test_watchdog_abort_is_timeout_even_if_platform_timer_wakes_early(self):
+        from services.synthesis_service import request_upstream
+        class ImmediateTimer:
+            def __init__(self,delay,callback):self.callback=callback
+            def start(self):self.callback()
+            def cancel(self):pass
+        class Socket:
+            def shutdown(self,how):pass
+        class Connection:
+            sock=Socket()
+            def connect(self):pass
+            def request(self,*args,**kwargs):pass
+            def getresponse(self):raise ConnectionAbortedError('watchdog shutdown')
+            def close(self):pass
+        with patch('services.synthesis_service.threading.Timer',ImmediateTimer),patch('services.synthesis_service.http.client.HTTPConnection',return_value=Connection()):
+            with self.assertRaises(ServiceTimeout):request_upstream(1,'POST','/tts',time.monotonic()+10)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

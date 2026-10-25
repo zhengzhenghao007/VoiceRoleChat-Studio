@@ -1,8 +1,10 @@
 /* Local transcription jobs and independent, versioned correction drafts. */
+import { createDatasetPanel } from "./datasets.js";
 export function createTranscriptionWorkbench(callbacks) {
   const $=id=>document.getElementById(id);
   const state={visible:false,disposed:false,timer:null,pollToken:0,records:[],jobs:[],source:"",selected:null,
     saved:null,draft:null,base:null,dirty:false,epoch:0,request:0,loading:false,saving:false,conflict:false,stopAt:null};
+  let datasetPanel=null;
   const kind={legacy:"原始转写",job:"任务识别",review:"校对副本"};
   const statuses={queued:"排队中",running:"运行中",succeeded:"已完成",failed:"失败",cancelled:"已取消",timed_out:"已超时",interrupted:"已中断"};
   const phases={loading:"加载本地模型",transcribing:"正在转写",publishing:"正在保存",cleanup_failed:"进程清理失败",cancelling:"取消中"};
@@ -51,6 +53,7 @@ export function createTranscriptionWorkbench(callbacks) {
     for(const button of $("transcription-record-list").querySelectorAll("button"))button.disabled=locked;
     for(const button of $("transcription-job-list").querySelectorAll("button"))button.disabled=locked;
     for(const button of $("transcript-segments").querySelectorAll("button"))button.disabled=state.loading || (locked && !state.saving) || (button.dataset.audio==="true" && !audioUrl(state.saved?.audio_url));
+    datasetPanel?.renderControls();
   }
   function renderRecords(){
     const list=$("transcription-record-list");list.replaceChildren();
@@ -152,7 +155,7 @@ export function createTranscriptionWorkbench(callbacks) {
       select.value=state.source;renderControls();
     }catch(error){callbacks.notice("音频列表读取失败，请刷新转写重试。",true);}
   }
-  async function refresh(){await Promise.allSettled([refreshSources(),refreshRecords(),refreshJobs()]);}
+  async function refresh(){await Promise.allSettled([refreshSources(),refreshRecords(),refreshJobs(),datasetPanel?.refresh()]);}
   async function submit(){
     if(!validSource(state.source) || callbacks.isBusy())return;
     await callbacks.busy("transcribe",async()=>{
@@ -207,6 +210,7 @@ export function createTranscriptionWorkbench(callbacks) {
   $("reload-transcript").addEventListener("click",()=>state.saved && openRecord(state.saved.id,true));
   $("transcript-audio").addEventListener("timeupdate",()=>{if(state.stopAt!==null && $("transcript-audio").currentTime>=state.stopAt)stopAudio();});
   window.addEventListener("pagehide",()=>{state.disposed=true;state.pollToken+=1;clearTimeout(state.timer);stopAudio();});
+  datasetPanel=createDatasetPanel({...callbacks,review:()=>state.saved?{...state.saved,dirty:state.dirty,pending:state.loading || state.saving}:null});
   renderControls();
   return {renderControls,setVisible,setSource,hasDraft:()=>state.dirty,refresh};
 }

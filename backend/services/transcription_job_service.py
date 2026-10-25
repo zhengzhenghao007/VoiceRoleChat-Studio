@@ -18,8 +18,12 @@ class JobError(RuntimeError):
 
 def now():return datetime.now(timezone.utc).isoformat()
 def safe(path):
-    path=Path(path).absolute()
-    if path.resolve()!=path:raise JobError('Unsafe job storage path')
+    try:
+        path=Path(path).absolute()
+        resolved=path.resolve()
+    except (OSError,RuntimeError) as error:
+        raise JobError('Unsafe or unresolvable storage path') from error
+    if resolved!=path:raise JobError('Unsafe job storage path')
     return path
 
 def read_json(path,limit=MAX_RESULT):

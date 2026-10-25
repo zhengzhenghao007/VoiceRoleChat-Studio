@@ -13,6 +13,7 @@ from api.transcriptions import router as transcriptions_router, close_jobs
 from api.voices import router as voices_router
 from api.tts import router as tts_router, close_tts_service
 from config import create_project_directories, PROJECT_ROOT
+from services.segmented_dataset_service import cleanup_retained
 
 
 create_project_directories()
@@ -26,7 +27,10 @@ async def lifespan(app):
         try:
             await run_in_threadpool(close_jobs)
         finally:
-            await run_in_threadpool(close_tts_service)
+            try:
+                await run_in_threadpool(cleanup_retained)
+            finally:
+                await run_in_threadpool(close_tts_service)
 
 
 app = FastAPI(

@@ -1,5 +1,7 @@
 import json
 import shutil
+import re
+import unicodedata
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -23,6 +25,8 @@ SUPPORTED_LANGUAGES = {
 
 
 def validate_filename(filename: str) -> str:
+    if not isinstance(filename,str) or not filename or filename in {'.','..'} or re.search(r'[\\/:\x00-\x1f]',filename):
+        raise HTTPException(status_code=400,detail='Invalid filename.')
     safe_filename = Path(filename).name
 
     if safe_filename != filename:
@@ -32,6 +36,23 @@ def validate_filename(filename: str) -> str:
         )
 
     return safe_filename
+
+def safe_path(path: Path) -> Path:
+    path=path.absolute()
+    if path.resolve()!=path:
+        raise HTTPException(status_code=400,detail='Unsafe dataset input or output path.')
+    return path
+
+def annotation_value(value, name):
+    if not isinstance(value,str) or not value.strip() or any(ch=='|' or unicodedata.category(ch)=='Cc' or ch in '\u2028\u2029' for ch in value):
+        raise HTTPException(status_code=400,detail=name+' must not contain delimiters or control characters.')
+    return value.strip()
+
+def remove_created_dataset(path):
+    target=safe_path(path);root=safe_path(DATASETS_DIR)
+    if target.parent!=root or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',target.name):
+        raise HTTPException(status_code=500,detail='Refused unsafe dataset cleanup.')
+    shutil.rmtree(target,ignore_errors=True)
 
 
 def load_json_file(file_path: Path, error_message: str) -> dict:
@@ -48,6 +69,8 @@ def load_json_file(file_path: Path, error_message: str) -> dict:
 def build_gpt_sovits_dataset(
     request: DatasetBuildRequest,
 ) -> dict:
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',request.character_id):
+        raise HTTPException(status_code=400,detail='Invalid character ID.')
     stored_filename = validate_filename(
         request.stored_filename
     )
@@ -65,6 +88,9 @@ def build_gpt_sovits_dataset(
         TRANSCRIPTS_DIR
         / transcript_filename
     )
+    character_config_path=safe_path(character_config_path)
+    audio_path=safe_path(audio_path)
+    transcript_path=safe_path(transcript_path)
 
     if not character_config_path.exists():
         raise HTTPException(
@@ -93,7 +119,7 @@ def build_gpt_sovits_dataset(
         "Transcript could not be read.",
     )
 
-    language = transcript_data.get("language", "").strip()
+    language = annotation_value(transcript_data.get("language", ""),'Language')
 
     if language not in SUPPORTED_LANGUAGES:
         raise HTTPException(
@@ -104,7 +130,7 @@ def build_gpt_sovits_dataset(
             ),
         )
 
-    transcript_text = transcript_data.get("text", "").strip()
+    transcript_text = annotation_value(transcript_data.get("text", ""),'Transcript text')
 
     if not transcript_text:
         raise HTTPException(
@@ -112,15 +138,17 @@ def build_gpt_sovits_dataset(
             detail="The transcript does not contain any text.",
         )
 
-    speaker_name = character_data.get(
+    speaker_name = annotation_value(character_data.get(
         "name",
         request.character_id,
-    ).strip()
+    ),'Speaker name')
 
     dataset_directory = (
         DATASETS_DIR
         / request.dataset_name
     )
+    dataset_directory=safe_path(dataset_directory)
+    annotation_value(str(dataset_directory/'audio'/audio_path.name),'Annotation audio path')
     audio_directory = dataset_directory / "audio"
 
     if dataset_directory.exists():
@@ -145,10 +173,7 @@ def build_gpt_sovits_dataset(
             copied_audio_path,
         )
     except OSError as error:
-        shutil.rmtree(
-            dataset_directory,
-            ignore_errors=True,
-        )
+        remove_created_dataset(dataset_directory)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -211,10 +236,7 @@ def build_gpt_sovits_dataset(
             encoding="utf-8",
         )
     except OSError as error:
-        shutil.rmtree(
-            dataset_directory,
-            ignore_errors=True,
-        )
+        remove_created_dataset(dataset_directory)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

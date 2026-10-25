@@ -12,6 +12,9 @@ import socket
 import sys
 import threading
 import time
+import math
+import wave
+from array import array
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +30,9 @@ from services.transcription_job_service import TranscriptionJobs
 from services.transcript_review_service import TranscriptReviews
 from test_transcription_jobs import Worker
 from studio_transcriptions import transcription_flow
+from api.datasets import get_segmented
+from services.segmented_dataset_service import SegmentedDatasets
+from studio_datasets import dataset_flow
 from schemas.character import CharacterPatch
 from services.character_service import CharacterService
 from services.tts_service import ProbeResult
@@ -62,6 +68,8 @@ def main():
     transcript_reviews=TranscriptReviews(fixture.root/'transcripts',fixture.root/'uploads')
     app.dependency_overrides[get_jobs]=lambda:transcript_jobs
     app.dependency_overrides[get_reviews]=lambda:transcript_reviews
+    segmented_datasets=SegmentedDatasets(fixture.root/'datasets',fixture.root/'uploads',transcript_reviews,fixture.root/'characters')
+    app.dependency_overrides[get_segmented]=lambda:segmented_datasets
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(128)
@@ -253,7 +261,9 @@ def main():
                     page.get_by_role("tab",name="音频",exact=True).click()
                     expect(page.get_by_role("heading",name="音频库",exact=True)).to_be_visible()
                     library_source=fixture.root/"library-source.wav"
-                    library_source.write_bytes(fixtures.pcm(4))
+                    with wave.open(str(library_source),'wb') as tone:
+                        tone.setparams((1,2,16000,0,'NONE',''))
+                        tone.writeframes(array('h',(int(6000*math.sin(2*math.pi*220*index/16000)) for index in range(64000))).tobytes())
                     page.get_by_label("上传音频",exact=True).set_input_files(library_source)
                     expect(page.get_by_role("button",name="library-source.wav",exact=True)).to_be_visible()
                     page.get_by_role("button",name="library-source.wav",exact=True).click()
@@ -269,6 +279,7 @@ def main():
                     page.get_by_role("button",name="新建角色",exact=True).click()
                     page.get_by_role("tab",name="音频",exact=True).click()
                     transcription_flow(page,transcript_jobs,transcript_reviews,fixture.root,args.screenshots_dir)
+                    dataset_flow(page,segmented_datasets,transcript_reviews,store,args.screenshots_dir)
                     page.evaluate("() => {window.__realMic=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);navigator.mediaDevices.getUserMedia=()=>Promise.reject(new DOMException('denied','NotAllowedError'));}")
                     page.get_by_role("button",name="开始录音",exact=True).click()
                     expect(page.locator("#notice")).to_contain_text("麦克风权限被拒绝")
@@ -321,7 +332,7 @@ def main():
                     assert page.evaluate("window.__exitStream.getTracks().every(track=>track.readyState==='ended')")
                     assert not errors, errors
                     unexpected_console = [message for message in console_errors if not (
-                        message.startswith("Failed to load resource:") and re.search(r"status of (409|422|503)|net::ERR_(FAILED|ABORTED)", message))]
+                        message.startswith("Failed to load resource:") and re.search(r"status of (409|422|429|503|504)|net::ERR_(FAILED|ABORTED)", message))]
                     assert not unexpected_console, unexpected_console
                     print(json.dumps({"status": "PASS", "checks": ["create/edit/reload", "upload/bind",
                         "service start/stop", "audition/audio", "revision conflict", "missing model preservation",
@@ -332,7 +343,8 @@ def main():
                         "audio mobile", "transcription submit/status/cancel/result", "immutable raw/correction copy",
                         "review conflict/reload", "review pending-save draft", "review dirty switch/tab retention",
                         "segment add/reorder/delete/validation", "record request identity", "record failed-load retry", "orphan audio/text",
-                        "transcript safe DOM/mobile", "visible-only job polling", "no unexpected console/page errors"],
+                        "transcript safe DOM/mobile", "visible-only job polling", "saved-review dataset gate",
+                        "native segmented build/list/manifest", "dataset409/422/429/503/504 preserves data", "dataset mobile/no training", "no unexpected console/page errors"],
                         "screenshots": str(args.screenshots_dir)}, ensure_ascii=False), flush=True)
                 except Exception:
                     try:

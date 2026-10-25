@@ -14,7 +14,7 @@ class StudioStaticTests(unittest.TestCase):
             response = client.get("/studio/")
             self.assertEqual(response.status_code, 200)
             self.assertIn('lang="zh-CN"', response.text)
-            for asset in ("app.js", "audio.js", "transcriptions.js", "style.css"):
+            for asset in ("app.js", "audio.js", "transcriptions.js", "datasets.js", "style.css"):
                 self.assertEqual(client.get("/studio/" + asset).status_code, 200)
             self.assertEqual(client.get("/").json(), {"message": "VoiceRoleChat Studio backend is running"})
             self.assertEqual(client.get("/health").json(), {"status": "healthy"})
