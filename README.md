@@ -11,7 +11,7 @@
 | 后端基础 | FastAPI、健康检查、OpenAPI | 已通过实际 Uvicorn HTTP 测试 |
 | 角色 | 创建、编辑、版本化 JSON、声音绑定和按角色合成 | 已验证兼容旧记录、修订冲突、绑定和合成配置快照 |
 | 音频库 | 上传、解码检查、原音试听、参考片段和录音预览/导入 | WAV/MP3 与 WebM 实际解码通过；录音浏览器测试使用合成麦克风 |
-| 语音转写 | faster-whisper 离线加载、串行推理、校验与原子保存 | 已有日语 CPU HTTP 实测；持久任务、取消和逐段编辑待开发 |
+| 语音转写 | 离线 Whisper、持久任务队列、取消、硬超时和恢复 | Windows 日语 CPU HTTP 实测；逐段编辑与任务 UI 待开发 |
 | 数据集 | 从音频和转写生成 GPT-SoVITS 标注 | 已有实现；逐段校对、切片与质量检查待开发 |
 | 训练 | 后台任务、状态记录和 GPT-SoVITS Worker | 已有训练产物；本轮未重跑 GPU 训练 |
 | 模型管理 | 权重配对、版本选择、导出发现、来源去重、ID 冲突处理 | 已有专项回归与真实列表/详情/刷新测试 |
@@ -133,6 +133,7 @@ python -m venv .venv
 | `WHISPER_MODEL_SIZE` | `small`；模型名称或模型标识 |
 | `WHISPER_DEVICE` | `cpu`；可选 `cpu`、`cuda`、`auto` |
 | `WHISPER_COMPUTE_TYPE` | `int8`；如 `float32`、`float16`、`auto` 等受支持类型；硬件兼容性在实际加载时判断 |
+| `WHISPER_JOB_TIMEOUT` | 后台转写运行截止时间，默认 300 秒，最大 3600 秒；不适用于旧同步接口 |
 
 ```powershell
 $env:GPT_SOVITS_ROOT = 'D:\tools\GPT-SoVITS'
@@ -258,6 +259,10 @@ models/<job_id>/manifest.json      # 导出记录与对应权重
 | POST | `/api/voices/{stored_filename}/reference` | 新建 3–10 秒参考 WAV，不覆盖原音 |
 | POST | `/api/transcriptions` | 转写已上传音频 |
 | POST | `/api/transcriptions/upload` | 上传并转写 |
+| POST / GET | `/api/transcriptions/jobs` | 提交后台转写（202）/ 列出任务与诊断 |
+| GET | `/api/transcriptions/jobs/{id}` | 查询状态及真实阶段 |
+| POST | `/api/transcriptions/jobs/{id}/cancel` | 请求取消；确认回收后进入取消终态 |
+| GET | `/api/transcriptions/jobs/{id}/result` | 读取已完成结果；未完成返回 409 |
 | POST | `/api/datasets/build` | 构建数据集 |
 | POST | `/api/training/start` | 启动训练，可能消耗 GPU 资源 |
 | GET | `/api/training` | 训练任务列表 |
@@ -286,7 +291,7 @@ models/<job_id>/manifest.json      # 导出记录与对应权重
 部分测试只读访问当前本地角色和模型记录，因此本地损坏的配置文件可能影响测试结果。
 
 开发依赖声明固定了 `httpx==0.28.1`；这不是完整的运行时或传递依赖锁文件，也不是全新环境安装验收。
-最近验证：两套现有 Python 环境均运行 **108 项测试：107 项通过、1 项跳过**，包括真实 HTTP 启动、合成事务、角色持久化、音频解码/裁剪、离线转写和静态入口。另有 Chromium 工作台 **26 项流程检查**全部通过。
+最近验证：两套现有 Python 环境均运行 **135 项测试：134 项通过、1 项跳过**，包括真实 HTTP 启动、合成事务、音频处理、离线转写、后台任务、Windows 进程回收和静态入口。另有 Chromium 工作台 **26 项流程检查**全部通过（C2C-008，本轮没有前端改动）。
 跳过项是需要额外 Windows 权限的真实符号链接测试；另有模拟路径解析逃逸测试通过。
 浏览器验收使用已有 Python Playwright 与 Chromium（不是运行工作台的依赖），不自动安装或下载：
 
@@ -325,8 +330,20 @@ Whisper 只读取已经准备好的本地模型/缓存，绝不隐式下载；`W
 
 结果保存到 `transcripts/<音频 UUID>.json`，成功重转写会替换该结果；失败保留旧结果。
 当前仍是同步请求，同一进程中串行执行；上传接口使用线程池避免阻塞事件循环，
-不代表可取消或有推理硬超时。持久任务和逐段编辑尚未实现。
+不代表可取消或有推理硬超时；需要这些能力请使用下述后台任务接口。
 已有 8.064 秒日语样本通过实际离线 CPU HTTP 验收，详见 [C2C-009A 结果](docs/C2C-009A-results.md)。
+
+后台转写目前支持 **Windows、单后端进程**。提交相同的音频和语言到 `/api/transcriptions/jobs`，
+取得响应中的 `id` 后轮询详情和结果。最多一个运行任务和五个排队任务，排队已满返回 429。
+取消先返回取消意图；只有自有进程确认回收才显示 `cancelled`，清理失败会阻止新任务。
+模型缺失时任务进入 `failed`，`error_code=model_unavailable`，不触发下载。
+
+每个任务使用原音副本，完成结果另存为 `transcripts/<任务 UUID>.json`，不覆盖旧转写。
+后端重启不会自动重跑排队/运行任务；未提交的任务标记 `interrupted`，可以显式创建新任务重试。
+已提交但尚未更新成功状态的结果，必须通过身份、nonce、源摘要及 Schema 校验才能恢复成功。
+Windows Job Object 在 Worker 执行前绑定，退出时清理后代；无法安全绑定时不会放行 Worker。
+其他平台保留旧同步接口，后台提交返回不可用。任务与逐段校对的工作台 UI 尚未实现。
+详见 [C2C-009B 验证记录](docs/C2C-009B-results.md)。
 
 ## 仓库结构与本地数据
 

@@ -9,7 +9,7 @@ from api.characters import router as characters_router
 from api.datasets import router as datasets_router
 from api.models import router as models_router
 from api.training import router as training_router
-from api.transcriptions import router as transcriptions_router
+from api.transcriptions import router as transcriptions_router, close_jobs
 from api.voices import router as voices_router
 from api.tts import router as tts_router, close_tts_service
 from config import create_project_directories, PROJECT_ROOT
@@ -23,7 +23,10 @@ async def lifespan(app):
     try:
         yield
     finally:
-        await run_in_threadpool(close_tts_service)
+        try:
+            await run_in_threadpool(close_jobs)
+        finally:
+            await run_in_threadpool(close_tts_service)
 
 
 app = FastAPI(

@@ -26,3 +26,20 @@
 尚未开始生产 owned_worker、队列、任务 API 或编辑器实现。
 下一步：先做进程所有权失败注入 RED/GREEN，不能跳过关卡直接运行 Whisper。
 用户持续推进授权有效；无需重复设计确认。C2C-009A 已发布 741074f。
+
+## 执行 ledger（当前设计为权威）
+
+Pre-flight: OwnedWorker.start/poll/stop -> 单调调度与退出回收；infer_path -> 旧同步
+保存及私有 Worker 候选；state/nonce/result -> 取消、恢复、只读 API；全局实例 ->
+FastAPI 退出。接口逐项核对一致。沿用当前 checkout/现有独立 ChatGPT 审查流程。
+Task 1: RED missing module -> 5 GREEN，最终 6 GREEN（父进程崩溃后代清理）。
+Task 2: RED missing store -> 9 GREEN；阶段读取、关机写盘失败重试另有 RED/GREEN。
+Task 3: RED missing pure worker -> 25 项相关 GREEN，旧同步 13 项保持。
+Task 4: RED missing API、未知参数被忽略 -> 严格新请求及单例/生命周期 GREEN。
+Task 5: 双环境 135 项（134 PASS/1 skip）；真实离线 CPU HTTP 两套都通过。
+Ruling: stdout 不使用管道/IPC，改为有界私有阶段/候选 JSON；更小协议面且避免
+原生库输出塞满管道。新结果 GET 只读取，不提供编辑；009C 后续实现。
+Ruling: 后台只支持已验证的 Windows 所有权，其他平台 503；不降低清理保证。
+Ruling: 既有 Windows 执行环境/资源和用户连续开发意图下继续原 checkout，避免
+切换连接/模型绝对路径。没有重置或丢弃用户成果。
+待独立审查；本轮未创建训练或下载任务。

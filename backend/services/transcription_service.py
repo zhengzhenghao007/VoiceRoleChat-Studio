@@ -72,52 +72,55 @@ def _save_result(data, filename):
                 raise HTTPException(500, 'Transcript temporary file cleanup failed; check local storage.') from error
 
 
+def infer_path(audio_path, stored_filename, language, model):
+    """Fully consume and validate inference; caller owns locking/publication."""
+    transcript_filename = Path(stored_filename).stem + ".json"
+    if language is not None and language not in getattr(model, 'supported_languages', _LANGUAGE_CODES):
+        raise HTTPException(422, 'The local model does not support this language.')
+    try:
+        generator, info = model.transcribe(str(audio_path), language=language,
+            beam_size=5, vad_filter=True, word_timestamps=False)
+        header = TranscriptionResponse(stored_filename=stored_filename,
+            language=info.language, language_probability=info.language_probability,
+            duration=info.duration, text='', segments=[],
+            transcript_file='transcripts/' + transcript_filename)
+        if header.language not in _LANGUAGE_CODES:
+            raise ValueError('Invalid detected language')
+        rows = []
+        characters = 0
+        previous_start = 0.0
+        for index, row in enumerate(generator):
+            if not isinstance(row.text, str):
+                raise ValueError('Invalid segment text')
+            text = row.text.strip()
+            characters += len(text)
+            if index >= 100000 or characters > 1024 * 1024:
+                raise ValueError('Transcript exceeds segment/text budget')
+            # Validate even silent rows so malformed timing is not ignored.
+            checked = TranscriptionSegment(start=row.start, end=row.end, text=text)
+            if checked.start < previous_start:
+                raise ValueError('Segments are not in chronological order')
+            previous_start = checked.start
+            if checked.end > header.duration + .01:
+                raise ValueError('Segment exceeds audio duration')
+            if text:
+                rows.append(checked.model_dump())
+        data = TranscriptionResponse(stored_filename=stored_filename,
+            language=header.language, language_probability=header.language_probability,
+            duration=header.duration, text=' '.join(row['text'] for row in rows),
+            segments=rows, transcript_file='transcripts/' + transcript_filename)
+        result = data.model_dump()
+    except Exception as error:
+        raise HTTPException(500, 'Audio transcription failed; check local audio/model compatibility. No result was published.') from error
+    return result
+
+
 def transcribe_audio(stored_filename: str, language: str | None = None) -> dict:
     if language is not None and language not in _LANGUAGE_CODES:
         raise HTTPException(422, 'Unsupported transcription language code.')
     audio_path = validate_stored_filename(stored_filename)
-    transcript_filename = audio_path.stem + '.json'
-    # Hold through lazy decoding, metadata validation and publication, ensuring
-    # same-target requests never race to overwrite out of inference order.
     with _inference_lock:
-        model = get_whisper_model()
-        if language is not None and language not in getattr(model, 'supported_languages', _LANGUAGE_CODES):
-            raise HTTPException(422, 'The local model does not support this language.')
-        try:
-            generator, info = model.transcribe(str(audio_path), language=language,
-                beam_size=5, vad_filter=True, word_timestamps=False)
-            header = TranscriptionResponse(stored_filename=stored_filename,
-                language=info.language, language_probability=info.language_probability,
-                duration=info.duration, text='', segments=[],
-                transcript_file='transcripts/' + transcript_filename)
-            if header.language not in _LANGUAGE_CODES:
-                raise ValueError('Invalid detected language')
-            rows = []
-            characters = 0
-            previous_start = 0.0
-            for index, row in enumerate(generator):
-                if not isinstance(row.text, str):
-                    raise ValueError('Invalid segment text')
-                text = row.text.strip()
-                characters += len(text)
-                if index >= 100000 or characters > 1024 * 1024:
-                    raise ValueError('Transcript exceeds segment/text budget')
-                # Validate even silent rows so malformed timing is not ignored.
-                checked = TranscriptionSegment(start=row.start, end=row.end, text=text)
-                if checked.start < previous_start:
-                    raise ValueError('Segments are not in chronological order')
-                previous_start = checked.start
-                if checked.end > header.duration + .01:
-                    raise ValueError('Segment exceeds audio duration')
-                if text:
-                    rows.append(checked.model_dump())
-            data = TranscriptionResponse(stored_filename=stored_filename,
-                language=header.language, language_probability=header.language_probability,
-                duration=header.duration, text=' '.join(row['text'] for row in rows),
-                segments=rows, transcript_file='transcripts/' + transcript_filename)
-            result = data.model_dump()
-        except Exception as error:
-            raise HTTPException(500, 'Audio transcription failed; check local audio/model compatibility. No result was published.') from error
+        result = infer_path(audio_path, stored_filename, language, get_whisper_model())
         persisted = {key:value for key,value in result.items() if key != 'transcript_file'}
-        _save_result(persisted, transcript_filename)
+        _save_result(persisted, audio_path.stem + '.json')
         return result
